@@ -1,39 +1,52 @@
 #import "TunerEngine.h"
 #import "TunerBridge.h"
+#import <AVFoundation/AVFoundation.h>
 
 @implementation TunerEngine {
-  TunerBridge* _bridge;
+  TunerBridge* _tunerBridge;
 }
+
+RCT_EXPORT_MODULE(TunerEngine)
 
 - (instancetype)init {
   self = [super init];
   if (self) {
-    _bridge = [[TunerBridge alloc] init];
+    NSLog(@"[TunerEngine] init");
+    _tunerBridge = [[TunerBridge alloc] init];
 
-    __weak typeof(self) weakSelf = self;
-    _bridge.onPitch = ^(NSDictionary* event) {
-      __strong typeof(weakSelf) strongSelf = weakSelf;
+    __weak __typeof__(self) weakSelf = self;
+    _tunerBridge.onPitch = ^(NSDictionary* event) {
+      __strong __typeof__(weakSelf) strongSelf = weakSelf;
       if (!strongSelf) return;
-      [strongSelf sendEventWithName:@"onPitch" body:event];
+      static int n = 0;
+      if (++n <= 5) {
+        NSLog(@"[TunerEngine] onPitch #%d hasPitch=%@ cbSet=%d", n, event[@"hasPitch"], !!strongSelf->_eventEmitterCallback);
+      }
+      if (!strongSelf->_eventEmitterCallback) return;
+      strongSelf->_eventEmitterCallback("onPitch", event);
     };
   }
   return self;
 }
 
-- (NSArray<NSString *> *)supportedEvents {
-  return @[@"onPitch"];
+- (void)setEventEmitterCallback:(EventEmitterCallbackWrapper *)eventEmitterCallbackWrapper {
+  [super setEventEmitterCallback:eventEmitterCallbackWrapper];
+  NSLog(@"[TunerEngine] setEventEmitterCallback called — cbSet=%d", !!_eventEmitterCallback);
 }
+
+- (void)addListener:(NSString *)eventName {}
+- (void)removeListeners:(double)count {}
 
 - (void)configure:(NSDictionary *)opts
           resolve:(RCTPromiseResolveBlock)resolve
            reject:(RCTPromiseRejectBlock)reject {
-  [_bridge configure:opts];
+  [_tunerBridge configure:opts];
   resolve(nil);
 }
 
 - (void)start:(RCTPromiseResolveBlock)resolve
        reject:(RCTPromiseRejectBlock)reject {
-  [_bridge startWithCompletion:^(NSError* error) {
+  [_tunerBridge startWithCompletion:^(NSError* error) {
     if (error) {
       reject(@"START_ERROR", error.localizedDescription, error);
     } else {
@@ -44,20 +57,20 @@
 
 - (void)stop:(RCTPromiseResolveBlock)resolve
       reject:(RCTPromiseRejectBlock)reject {
-  [_bridge stop];
+  [_tunerBridge stop];
   resolve(nil);
 }
 
 - (void)setA4:(double)hz {
-  [_bridge setA4:(float)hz];
+  [_tunerBridge setA4:(float)hz];
 }
 
 - (void)setInstrument:(NSString *)name {
-  [_bridge setInstrument:name];
+  [_tunerBridge setInstrument:name];
 }
 
 - (void)setTemperament:(NSString *)name {
-  [_bridge setTemperament:name];
+  [_tunerBridge setTemperament:name];
 }
 
 - (void)requestPermission:(RCTPromiseResolveBlock)resolve
@@ -68,10 +81,9 @@
 }
 
 - (NSDictionary *)getStatus {
-  return [_bridge getStatus];
+  return [_tunerBridge getStatus];
 }
 
-// RCTEventEmitter overrides — addListener/removeListeners are inherited
 + (BOOL)requiresMainQueueSetup {
   return NO;
 }
@@ -80,10 +92,6 @@
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
   return std::make_shared<facebook::react::NativeTunerEngineSpecJSI>(params);
-}
-
-+ (NSString *)moduleName {
-  return @"TunerEngine";
 }
 
 @end

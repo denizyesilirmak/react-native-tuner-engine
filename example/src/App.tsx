@@ -25,6 +25,7 @@ export default function App() {
 
   useEffect(() => {
     const sub = onPitch((event) => {
+      console.log('[TunerEngine] onPitch event:', JSON.stringify(event));
       setLatest(event);
       if (event.hasPitch) {
         setLog((prev) => [
@@ -33,6 +34,7 @@ export default function App() {
         ]);
       }
     });
+    console.log('[TunerEngine] onPitch listener registered, sub:', sub);
     return () => sub.remove();
   }, []);
 
@@ -41,10 +43,20 @@ export default function App() {
       await stop();
       setIsRunning(false);
     } else {
-      const granted = await requestPermission();
-      if (!granted) return;
-      await start();
-      setIsRunning(true);
+      try {
+        const granted = await requestPermission();
+        console.log('[TunerEngine] permission granted:', granted);
+        if (!granted) {
+          console.warn('[TunerEngine] microphone permission denied');
+          return;
+        }
+        console.log('[TunerEngine] calling start...');
+        await start();
+        console.log('[TunerEngine] start resolved');
+        setIsRunning(true);
+      } catch (e) {
+        console.error('[TunerEngine] start error:', e);
+      }
     }
   }, [isRunning]);
 
@@ -98,18 +110,18 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111', alignItems: 'center' },
-  title: { color: '#fff', fontSize: 20, fontWeight: '600', marginTop: 16 },
+  container: { flex: 1, backgroundColor: '#fff', alignItems: 'center' },
+  title: { color: '#000', fontSize: 20, fontWeight: '600', marginTop: 16 },
   pitchCard: {
     alignItems: 'center',
     justifyContent: 'center',
     height: 180,
     marginVertical: 24,
   },
-  note: { color: '#fff', fontSize: 80, fontWeight: '700', lineHeight: 88 },
-  cents: { color: '#aef', fontSize: 28, marginTop: 4 },
-  freq: { color: '#888', fontSize: 16, marginTop: 4 },
-  meta: { color: '#555', fontSize: 12, marginTop: 4 },
+  note: { color: '#000', fontSize: 80, fontWeight: '700', lineHeight: 88 },
+  cents: { color: '#000', fontSize: 28, marginTop: 4 },
+  freq: { color: '#000', fontSize: 16, marginTop: 4 },
+  meta: { color: '#000', fontSize: 12, marginTop: 4 },
   noSignal: { color: '#444', fontSize: 28 },
   button: {
     backgroundColor: '#27ae60',

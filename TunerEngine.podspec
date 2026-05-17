@@ -20,6 +20,8 @@ Pod::Spec.new do |s|
   ]
   s.private_header_files = "ios/**/*.h"
 
+  s.frameworks = ["AVFoundation", "AVFAudio"]
+
   s.pod_target_xcconfig = {
     "HEADER_SEARCH_PATHS" => "\"$(PODS_TARGET_SRCROOT)/cpp/include\"",
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17",

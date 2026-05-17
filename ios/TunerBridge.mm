@@ -25,11 +25,13 @@
 }
 
 - (void)buildDispatcherWithSampleRate:(float)sr frameSize:(int)fs opts:(NSDictionary*)opts {
-  __weak typeof(self) weakSelf = self;
+  __weak __typeof__(self) weakSelf = self;
 
   _dispatcher = std::make_unique<AudioFrameDispatcher>(fs, sr,
     [weakSelf](const PitchResult& r) {
-      __strong typeof(weakSelf) strongSelf = weakSelf;
+      static int callCount = 0;
+      if (++callCount <= 3) NSLog(@"[TunerBridge] dispatcher callback #%d hasPitch=%d freq=%.1f", callCount, r.hasPitch, r.frequency);
+      __strong __typeof__(weakSelf) strongSelf = weakSelf;
       if (!strongSelf || !strongSelf.onPitch) return;
 
       NSDictionary* event = @{
@@ -66,9 +68,11 @@
     [self buildDispatcherWithSampleRate:48000.0f frameSize:2048 opts:@{}];
   }
 
-  __weak typeof(self) weakSelf = self;
+  __weak __typeof__(self) weakSelf = self;
   _audioSource.onSamples = ^(const float* samples, int count, float sampleRate) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
+    static int tapCount = 0;
+    if (++tapCount <= 3) NSLog(@"[TunerBridge] onSamples #%d count=%d", tapCount, count);
+    __strong __typeof__(weakSelf) strongSelf = weakSelf;
     if (!strongSelf || !strongSelf->_dispatcher) return;
     strongSelf->_dispatcher->push(samples, count);
   };

@@ -1,4 +1,4 @@
-import { NativeEventEmitter, NativeModules } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import TunerEngineModule from './NativeTunerEngine';
 
 export type PitchEvent = {
@@ -20,7 +20,9 @@ export type TunerConfig = {
   maxFrequency?: number;
 };
 
-const emitter = new NativeEventEmitter(NativeModules.TunerEngine);
+// RCTEventEmitter.sendEventWithName: routes through RCTDeviceEventEmitter on the JS side.
+// DeviceEventEmitter is the JS-side subscriber for these events on both platforms.
+const emitter = DeviceEventEmitter;
 
 export function configure(opts: TunerConfig): Promise<void> {
   return TunerEngineModule.configure(opts);

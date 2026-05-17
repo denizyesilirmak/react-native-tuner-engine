@@ -1,4 +1,5 @@
 #import "IosAudioSource.h"
+#import <AVFoundation/AVFoundation.h>
 
 @implementation IosAudioSource {
   AVAudioEngine* _engine;
@@ -43,7 +44,7 @@
 
   [session setMode:AVAudioSessionModeMeasurement error:nil];
   [session setPreferredSampleRate:48000.0 error:nil];
-  [session setPreferredIOBufferDuration:0.0213 error:nil]; // ~1024 samples at 48kHz
+  [session setPreferredIOBufferDuration:0.0213 error:nil];
   [session setActive:YES error:&sessionError];
   if (sessionError) {
     if (error) *error = sessionError;
@@ -54,19 +55,20 @@
   _engine = [[AVAudioEngine alloc] init];
   _inputNode = _engine.inputNode;
 
-  // Request mono float32 at the device sample rate
-  AVAudioFormat* recordingFormat = [[AVAudioFormat alloc]
-    initWithCommonFormat:AVAudioPCMFormatFloat32
-              sampleRate:_sampleRate
-              channels:1
-           interleaved:YES];
+  AVAudioFormat* recordingFormat =
+    [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                     sampleRate:_sampleRate
+                                       channels:1
+                                    interleaved:YES];
 
-  __weak typeof(self) weakSelf = self;
+  __weak __typeof__(self) weakSelf = self;
+
   [_inputNode installTapOnBus:0
                    bufferSize:2048
                        format:recordingFormat
-                        block:^(AVAudioPCMBuffer* buffer, AVAudioTime* __unused when) {
-    __strong typeof(weakSelf) strongSelf = weakSelf;
+                        block:^(AVAudioPCMBuffer* buffer, AVAudioTime* when) {
+    (void)when;
+    __strong __typeof__(weakSelf) strongSelf = weakSelf;
     if (!strongSelf || !strongSelf->_isRunning) return;
 
     const float* data = buffer.floatChannelData[0];
@@ -110,7 +112,7 @@
            error:nil];
 }
 
-#pragma mark — Notifications
+#pragma mark - Notifications
 
 - (void)registerNotifications {
   [[NSNotificationCenter defaultCenter]
@@ -137,8 +139,8 @@
     AVAudioSessionInterruptionOptions options =
       (AVAudioSessionInterruptionOptions)[info[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue];
     if (options & AVAudioSessionInterruptionOptionShouldResume) {
-      NSError* error = nil;
-      [self startWithError:&error];
+      NSError* err = nil;
+      [self startWithError:&err];
     }
   }
 }
@@ -149,10 +151,9 @@
     (AVAudioSessionRouteChangeReason)[info[AVAudioSessionRouteChangeReasonKey] unsignedIntegerValue];
 
   if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
-    // Headphone unplugged etc. — restart to pick up new route
     [self stop];
-    NSError* error = nil;
-    [self startWithError:&error];
+    NSError* err = nil;
+    [self startWithError:&err];
   }
 }
 
