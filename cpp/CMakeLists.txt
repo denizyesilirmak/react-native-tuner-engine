@@ -9,6 +9,7 @@ add_library(tuner_engine_core STATIC
     src/NoteMapper.cpp
     src/YinPitchDetector.cpp
     src/TunerEngine.cpp
+    src/AudioFrameDispatcher.cpp
 )
 
 target_include_directories(tuner_engine_core PUBLIC include)

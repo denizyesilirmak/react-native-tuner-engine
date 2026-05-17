@@ -15,6 +15,11 @@ find_package(oboe REQUIRED CONFIG)
 
 add_library(tunerengine SHARED
   TunerEngineJni.cpp
+  OboeAudioSource.cpp
+)
+
+target_include_directories(tunerengine PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(tunerengine

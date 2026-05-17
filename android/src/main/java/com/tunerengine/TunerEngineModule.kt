@@ -1,9 +1,14 @@
 package com.tunerengine
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableNativeMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class TunerEngineModule(reactContext: ReactApplicationContext) :
   NativeTunerEngineSpec(reactContext) {
@@ -12,7 +17,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
 
   override fun configure(opts: ReadableMap?, promise: Promise) {
     val sampleRate = opts?.getDouble("sampleRate")?.toFloat() ?: 48000.0f
-    val frameSize = opts?.getInt("frameSize") ?: 2048
+    val frameSize = if (opts?.hasKey("frameSize") == true) opts.getInt("frameSize") else 2048
     val noiseGateDb = opts?.getDouble("noiseGateDb")?.toFloat() ?: -55.0f
     val confidenceThreshold = opts?.getDouble("confidenceThreshold")?.toFloat() ?: 0.75f
     val minFrequency = opts?.getDouble("minFrequency")?.toFloat() ?: 60.0f
@@ -48,7 +53,22 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   }
 
   override fun requestPermission(promise: Promise) {
-    promise.resolve(true)
+    val activity = currentActivity
+    if (activity == null) {
+      promise.resolve(false)
+      return
+    }
+
+    if (ActivityCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO)
+        == PackageManager.PERMISSION_GRANTED) {
+      promise.resolve(true)
+      return
+    }
+
+    ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.RECORD_AUDIO), 0)
+    // For a proper permission result callback, integrate with the activity's onRequestPermissionsResult.
+    // For M1, resolve optimistically after request.
+    promise.resolve(false)
   }
 
   override fun getStatus(): ReadableMap {
@@ -61,6 +81,32 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   override fun addListener(eventName: String) {}
 
   override fun removeListeners(count: Double) {}
+
+  // Called from the C++ worker thread via JNI
+  @Suppress("unused")
+  fun onPitchDetected(
+    hasPitch: Boolean,
+    frequency: Float,
+    confidence: Float,
+    rmsDb: Float,
+    noteName: String,
+    octave: Int,
+    cents: Float
+  ) {
+    val params = Arguments.createMap().apply {
+      putBoolean("hasPitch", hasPitch)
+      putDouble("frequency", frequency.toDouble())
+      putDouble("confidence", confidence.toDouble())
+      putDouble("rmsDb", rmsDb.toDouble())
+      putString("noteName", noteName)
+      putInt("octave", octave)
+      putDouble("cents", cents.toDouble())
+    }
+
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("onPitch", params)
+  }
 
   // JNI methods
   private external fun nativeInit(sampleRate: Float, frameSize: Int)

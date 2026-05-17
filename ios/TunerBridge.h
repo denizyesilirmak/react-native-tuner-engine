@@ -4,10 +4,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef void (^PitchEventCallback)(NSDictionary* event);
+
 @interface TunerBridge : NSObject
 
+@property(nonatomic, copy, nullable) PitchEventCallback onPitch;
+
 - (void)configure:(NSDictionary *)opts;
-- (void)start;
+- (void)startWithCompletion:(void(^)(NSError* _Nullable error))completion;
 - (void)stop;
 - (void)setA4:(float)hz;
 - (void)setInstrument:(NSString *)name;

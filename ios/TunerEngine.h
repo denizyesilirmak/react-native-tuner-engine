@@ -1,5 +1,6 @@
+#import <React/RCTEventEmitter.h>
 #import <TunerEngineSpec/TunerEngineSpec.h>
 
-@interface TunerEngine : NSObject <NativeTunerEngineSpec>
+@interface TunerEngine : RCTEventEmitter <NativeTunerEngineSpec>
 
 @end
