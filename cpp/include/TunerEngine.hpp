@@ -1,9 +1,13 @@
 #pragma once
 
-#include "NoteMapper.hpp"
+#include "Pipeline.hpp"
 #include "PitchResult.hpp"
-#include "YinPitchDetector.hpp"
 
+#include <memory>
+#include <string>
+
+// Facade that owns a Pipeline. The external API is identical to the pre-M2 TunerEngine
+// so AudioFrameDispatcher and all existing tests require no changes.
 class TunerEngine {
 public:
     TunerEngine(float sampleRate, int frameSize);
@@ -14,16 +18,8 @@ public:
     void setNoiseGateDb(float db);
     void setConfidenceThreshold(float value);
     void setFrequencyRange(float minFrequency, float maxFrequency);
+    void setInstrument(const std::string& name);
 
 private:
-    float calculateRmsDb(const float* input, int frameCount) const;
-
-    float sampleRate_;
-    int frameSize_;
-
-    float noiseGateDb_ = -55.0f;
-    float confidenceThreshold_ = 0.75f;
-
-    NoteMapper noteMapper_;
-    YinPitchDetector yin_;
+    std::unique_ptr<Pipeline> pipeline_;
 };

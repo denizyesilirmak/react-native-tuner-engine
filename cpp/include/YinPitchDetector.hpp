@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IPitchDetector.hpp"
 #include <vector>
 
 struct YinResult {
@@ -8,14 +9,18 @@ struct YinResult {
     float confidence = 0.0f;
 };
 
-class YinPitchDetector {
+class YinPitchDetector : public IPitchDetector {
 public:
     YinPitchDetector(float sampleRate, int frameSize);
 
+    // Legacy interface used by existing tests
     YinResult detect(const float* input, int frameCount);
 
-    void setFrequencyRange(float minFrequency, float maxFrequency);
-    void setThreshold(float threshold);
+    // IPitchDetector — delegates to the above
+    DetectorResult detect(const float* frame, int n, float sampleRate) override;
+
+    void setFrequencyRange(float minFrequency, float maxFrequency) override;
+    void setThreshold(float threshold) override;
 
 private:
     float sampleRate_;

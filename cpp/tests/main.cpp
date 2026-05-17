@@ -155,6 +155,126 @@ static void testTunerEngineQuietSignal() {
     assert(!result.hasPitch);
 }
 
+// --- M2: Pipeline / DSP hardening tests ---
+
+static void testPipelineCleanSine(float inputFrequency, const std::string& expectedNote, int expectedOctave) {
+    constexpr float sampleRate = 48000.0f;
+    constexpr int frameSize    = 4096;
+    constexpr int numFrames    = 6;
+
+    // Generate a single continuous sine (no phase discontinuity between frames)
+    // so the HPF state transitions correctly across frame boundaries.
+    auto continuous = generateSine(inputFrequency, sampleRate, frameSize * numFrames);
+
+    TunerEngine engine(sampleRate, frameSize);
+    PitchResult result;
+    for (int f = 0; f < numFrames; ++f) {
+        result = engine.process(continuous.data() + f * frameSize, frameSize);
+    }
+
+    std::cout
+        << "pipeline sine " << inputFrequency << " Hz"
+        << " → " << result.noteName << result.octave
+        << " cents=" << result.cents
+        << " conf=" << result.confidence << "\n";
+
+    assert(result.hasPitch);
+    assert(result.noteName == expectedNote);
+    assert(result.octave == expectedOctave);
+    assertNear(result.cents, 0.0f, 5.0f);
+}
+
+static void testPipelineNoisySignal() {
+    // Pure noise should NOT produce a stable pitch result
+    constexpr float sampleRate = 48000.0f;
+    constexpr int frameSize    = 4096;
+
+    TunerEngine engine(sampleRate, frameSize);
+    std::vector<float> buffer(frameSize);
+
+    // Pink-ish noise via simple LFSR-style scramble
+    uint32_t seed = 0xDEADBEEF;
+    for (int i = 0; i < frameSize; ++i) {
+        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+        buffer[i] = static_cast<float>(static_cast<int32_t>(seed)) / 2147483648.0f * 0.3f;
+    }
+
+    PitchResult result;
+    for (int f = 0; f < 6; ++f) {
+        result = engine.process(buffer.data(), static_cast<int>(buffer.size()));
+    }
+
+    std::cout
+        << "noisy signal hasPitch=" << result.hasPitch
+        << " conf=" << result.confidence << "\n";
+
+    // Noisy signal should have low confidence / no stable pitch
+    assert(!result.hasPitch || result.confidence < 0.50f);
+}
+
+static void testPipelineHysteresis() {
+    // Play A4 for several frames, then switch to B4 — verify debounce
+    constexpr float sampleRate = 48000.0f;
+    constexpr int frameSize    = 4096;
+    constexpr float freqA4     = 440.0f;
+    constexpr float freqB4     = 493.88f;
+
+    TunerEngine engine(sampleRate, frameSize);
+    PitchResult result;
+
+    // Stabilise on A4 — continuous sine
+    auto contA4 = generateSine(freqA4, sampleRate, frameSize * 6);
+    for (int f = 0; f < 6; ++f) {
+        result = engine.process(contA4.data() + f * frameSize, frameSize);
+    }
+    assert(result.hasPitch);
+    assert(result.noteName == "A");
+
+    // Switch to B4 — continuous sine.
+    // Median buffer (5) fills with B4 at frame 3 of the new note.
+    // Then hysteresis counter (3) confirms → lock at frame 5 (3 frames where median == B4).
+    // Feed 8 frames total to be comfortably past the switch.
+    auto contB4 = generateSine(freqB4, sampleRate, frameSize * 8);
+
+    result = engine.process(contB4.data(), frameSize);
+    std::cout
+        << "hysteresis after 1 B4 frame: note=" << result.noteName << "\n";
+
+    for (int f = 1; f < 8; ++f) {
+        result = engine.process(contB4.data() + f * frameSize, frameSize);
+    }
+    std::cout
+        << "hysteresis after 8 B4 frames: note=" << result.noteName << "\n";
+    assert(result.hasPitch);
+    assert(result.noteName == "B");
+}
+
+static void testInstrumentPreset() {
+    TunerEngine engine(48000.0f, 4096);
+    engine.setInstrument("guitar");
+
+    // E2 (82 Hz) — within guitar range, continuous sine
+    PitchResult result;
+    auto contE2 = generateSine(82.41f, 48000.0f, 4096 * 6);
+    for (int f = 0; f < 6; ++f) {
+        result = engine.process(contE2.data() + f * 4096, 4096);
+    }
+    std::cout << "guitar preset E2: hasPitch=" << result.hasPitch
+              << " note=" << result.noteName << result.octave << "\n";
+    assert(result.hasPitch);
+
+    // Switch to ukulele — G4 should work, E2 might not (too low)
+    engine.setInstrument("ukulele");
+    auto contG4 = generateSine(392.0f, 48000.0f, 4096 * 6);
+    for (int f = 0; f < 6; ++f) {
+        result = engine.process(contG4.data() + f * 4096, 4096);
+    }
+    std::cout << "ukulele preset G4: hasPitch=" << result.hasPitch
+              << " note=" << result.noteName << result.octave << "\n";
+    assert(result.hasPitch);
+    assert(result.noteName == "G");
+}
+
 int main() {
     testNoteMapper();
 
@@ -174,6 +294,16 @@ int main() {
 
     testTunerEngineSilence();
     testTunerEngineQuietSignal();
+
+    // M2 DSP hardening tests
+    testPipelineCleanSine(82.41f,  "E", 2);
+    testPipelineCleanSine(110.0f,  "A", 2);
+    testPipelineCleanSine(196.0f,  "G", 3);
+    testPipelineCleanSine(329.63f, "E", 4);
+    testPipelineCleanSine(440.0f,  "A", 4);
+    testPipelineNoisySignal();
+    testPipelineHysteresis();
+    testInstrumentPreset();
 
     std::cout << "all tuner engine tests passed." << std::endl;
 

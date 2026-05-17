@@ -88,6 +88,17 @@ YinResult YinPitchDetector::detect(const float* input, int frameCount) {
     return result;
 }
 
+DetectorResult YinPitchDetector::detect(const float* frame, int n, float sampleRate) {
+    // Store the passed sampleRate temporarily if it differs (Pipeline may have resampled)
+    const float savedSr = sampleRate_;
+    if (sampleRate > 0.0f && sampleRate != sampleRate_) {
+        sampleRate_ = sampleRate;
+    }
+    YinResult r = detect(frame, n);
+    sampleRate_ = savedSr;
+    return DetectorResult{ r.hasPitch, r.frequency, r.confidence };
+}
+
 float YinPitchDetector::parabolicInterpolation(int tau) const {
     if (tau <= 0 || tau >= static_cast<int>(cmnd_.size()) - 1) {
         return static_cast<float>(tau);

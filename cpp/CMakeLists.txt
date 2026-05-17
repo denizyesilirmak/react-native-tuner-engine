@@ -8,6 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(tuner_engine_core STATIC
     src/NoteMapper.cpp
     src/YinPitchDetector.cpp
+    src/Window.cpp
+    src/BiquadHpf.cpp
+    src/SnrEstimator.cpp
+    src/PostProcessor.cpp
+    src/Pipeline.cpp
     src/TunerEngine.cpp
     src/AudioFrameDispatcher.cpp
 )
