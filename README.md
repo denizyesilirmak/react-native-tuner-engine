@@ -2,15 +2,13 @@
 
 A React Native Turbo Module for real-time instrument pitch detection. The detection pipeline runs entirely in C++ on a dedicated audio thread and delivers per-frame results to JavaScript via the New Architecture event system.
 
-Requires React Native 0.75 or later with the New Architecture enabled.
-
-![Architecture Diagram](assets/diagram.png)
+Requires React Native **0.75 or later** with the New Architecture enabled.
 
 ## How it works
 
-Audio is captured through platform-native APIs (AVAudioEngine on iOS, Oboe on Android) and fed into a lock-free SPSC ring buffer. A C++ worker thread drains the buffer in fixed-size frames, runs the audio through a preprocessing pipeline (high-pass filter, Hann window), detects pitch with the YIN algorithm, maps the result to a musical note, applies median smoothing and hysteresis, then fires a callback with the final `PitchResult`. The native module marshals that result to JS as an `onPitch` event.
+Audio is captured through platform-native APIs (AVAudioEngine on iOS, Oboe on Android) and fed into a lock-free SPSC ring buffer. A C++ worker thread drains the buffer in fixed-size frames, runs the signal through a preprocessing pipeline, then through an ensemble of three pitch detectors (YIN, PYIN, cepstrum). The ensemble votes for the best estimate and fires an `onPitch` event on the JS thread.
 
-The audio callback allocates nothing at runtime. All working buffers are pre-allocated during initialization.
+The audio callback allocates nothing at runtime — all working buffers are pre-allocated during initialization.
 
 ## Installation
 
@@ -33,88 +31,83 @@ Then run `pod install`.
 
 ### Android
 
-The library's `AndroidManifest.xml` already declares `RECORD_AUDIO`. You still need to request the permission at runtime — use `requestPermission()` described below or handle it yourself before calling `start()`.
+The library's `AndroidManifest.xml` already declares `RECORD_AUDIO`. You still need to request the permission at runtime — use `requestPermission()` described below, or handle it yourself before calling `start()`.
+
+## Quick start
+
+```tsx
+import { useTuner } from 'react-native-tuner-engine';
+
+export function TunerScreen() {
+  const { start, stop, latest, isRunning, error } = useTuner({
+    noiseGateDb: -50,
+    confidenceThreshold: 0.75,
+  });
+
+  return (
+    <>
+      <Text>{latest?.noteName}{latest?.octave} {latest?.cents.toFixed(1)} ¢</Text>
+      <Button title={isRunning ? 'Stop' : 'Start'} onPress={isRunning ? stop : start} />
+    </>
+  );
+}
+```
+
+`useTuner` requests the microphone permission, configures the engine, and subscribes to events — all in one call.
 
 ## API
 
-### `configure(opts)`
+### `useTuner(options?)`
 
-Sets engine parameters. Call this before `start()`, or omit it to use the defaults.
+React hook. Returns `{ start, stop, latest, isRunning, error }`.
 
 ```typescript
-configure(opts: {
-  sampleRate?: number;          // default: 48000
-  frameSize?: number;           // default: 2048
-  noiseGateDb?: number;         // default: -55
-  confidenceThreshold?: number; // default: 0.75, range 0–1
-  minFrequency?: number;        // default: 60 Hz
-  maxFrequency?: number;        // default: 1200 Hz
-}): Promise<void>
+import { useTuner } from 'react-native-tuner-engine';
+
+const { start, stop, latest, isRunning, error } = useTuner({
+  // All fields optional — defaults shown
+  sampleRate?: number;          // 48000
+  frameSize?: number;           // 2048
+  noiseGateDb?: number;         // -55
+  confidenceThreshold?: number; // 0.75  (0–1)
+  minFrequency?: number;        // 60 Hz
+  maxFrequency?: number;        // 1200 Hz
+  instrument?: Instrument;      // 'chromatic'
+  a4?: number;                  // 440 Hz
+});
 ```
 
-### `start()`
+`start()` — requests mic permission, configures the engine, then begins capture. Throws if permission is denied.
 
-Starts audio capture and the processing thread. Resolves when the audio session is open and the thread is running.
+`stop()` — stops capture. Safe to call when already stopped.
+
+`latest` — the most recent `PitchEvent`, or `null` before the first frame.
+
+`error` — set if `start()` throws; `null` otherwise.
+
+### `TunerEngine`
+
+Low-level imperative API, useful outside of React components.
 
 ```typescript
-start(): Promise<void>
+import { TunerEngine } from 'react-native-tuner-engine';
+
+await TunerEngine.requestPermission(); // → boolean
+await TunerEngine.configure({ noiseGateDb: -50 });
+await TunerEngine.start();
+
+const unsub = TunerEngine.onPitch((event) => {
+  if (event.hasPitch) console.log(event.noteName, event.cents);
+});
+
+// later:
+unsub();
+await TunerEngine.stop();
 ```
 
-### `stop()`
-
-Stops audio capture and the processing thread. Safe to call if already stopped.
+### Types
 
 ```typescript
-stop(): Promise<void>
-```
-
-### `requestPermission()`
-
-Requests microphone permission. Returns `true` if granted.
-
-```typescript
-requestPermission(): Promise<boolean>
-```
-
-### `setA4(hz)`
-
-Sets the reference frequency for A4. Default is 440 Hz. Takes effect immediately without restarting the engine.
-
-```typescript
-setA4(hz: number): void
-```
-
-### `setInstrument(name)`
-
-Restricts the detection range to the frequency span of a given instrument. Reduces octave errors on instruments with a limited range.
-
-```typescript
-setInstrument(name: string): void
-// "guitar" | "bass" | "violin" | "cello" | "ukulele" | "chromatic"
-```
-
-### `setTemperament(name)`
-
-```typescript
-setTemperament(name: string): void
-// "equal" | "just"
-```
-
-### `getStatus()`
-
-Returns the current engine state synchronously.
-
-```typescript
-getStatus(): { isRunning: boolean; engineReady: boolean }
-```
-
-### `onPitch(callback)`
-
-Subscribes to pitch events. Returns an event subscription that should be removed when the component unmounts.
-
-```typescript
-onPitch(callback: (event: PitchEvent) => void): EventSubscription
-
 type PitchEvent = {
   hasPitch: boolean;
   frequency: number;  // Hz
@@ -122,68 +115,62 @@ type PitchEvent = {
   rmsDb: number;      // dBFS
   noteName: string;   // e.g. "A"
   octave: number;
-  cents: number;      // deviation from equal temperament, -50 to +50
-}
+  cents: number;      // −50 to +50 relative to equal temperament
+};
+
+type TunerConfig = {
+  sampleRate?: number;
+  frameSize?: number;
+  noiseGateDb?: number;
+  confidenceThreshold?: number;
+  minFrequency?: number;
+  maxFrequency?: number;
+};
+
+type Instrument =
+  | 'guitar' | 'bass' | 'violin' | 'viola' | 'cello'
+  | 'ukulele' | 'mandolin' | 'banjo' | 'chromatic';
+
+type Temperament = 'equal' | 'just';
 ```
 
-## Usage
+### Additional methods on `TunerEngine`
 
 ```typescript
-import { useEffect } from 'react';
-import {
-  configure,
-  start,
-  stop,
-  requestPermission,
-  onPitch,
-} from 'react-native-tuner-engine';
-
-export function useTuner() {
-  useEffect(() => {
-    let subscription: ReturnType<typeof onPitch> | null = null;
-
-    async function init() {
-      const granted = await requestPermission();
-      if (!granted) return;
-
-      await configure({ noiseGateDb: -50, confidenceThreshold: 0.8 });
-      await start();
-
-      subscription = onPitch((event) => {
-        if (event.hasPitch) {
-          console.log(
-            `${event.noteName}${event.octave} — ${event.cents > 0 ? '+' : ''}${event.cents.toFixed(1)} cents`
-          );
-        }
-      });
-    }
-
-    init();
-
-    return () => {
-      subscription?.remove();
-      stop();
-    };
-  }, []);
-}
+TunerEngine.setA4(hz: number): void          // default 440
+TunerEngine.setInstrument(name: Instrument): void
+TunerEngine.setTemperament(name: Temperament): void
+TunerEngine.getStatus(): { isRunning: boolean; engineReady: boolean }
 ```
 
 ## C++ pipeline
 
-The shared C++ core (`cpp/`) is compiled as a static library on both platforms. Stages run in order per frame:
+The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 
 | Stage | Class | Notes |
 |---|---|---|
 | High-pass filter | `BiquadHpf` | Direct-Form II Transposed, 70 Hz cutoff, Q 0.707 |
 | Windowing | `Window` | Hann window, precomputed coefficients |
-| Pitch detection | `YinPitchDetector` | YIN algorithm with parabolic interpolation |
-| Note mapping | `NoteMapper` | Hz to MIDI, note name, octave, cents deviation |
+| Pitch detection | `EnsembleSelector` | Runs YIN, PYIN, and cepstrum; votes by agreement within 1 semitone |
+| — detector 1 | `YinPitchDetector` | YIN with parabolic interpolation |
+| — detector 2 | `PyinPitchDetector` | Probabilistic YIN; prunes harmonic aliases |
+| — detector 3 | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; SNR-based confidence |
+| Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
 | SNR estimation | `SnrEstimator` | Signal RMS vs. noise-floor EMA |
-| Post-processing | `PostProcessor` | Median-5 filter, EMA, note-transition hysteresis |
+| Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing, note-transition hysteresis |
 | Dispatch | `AudioFrameDispatcher` | SPSC lock-free queue, dedicated worker thread |
+
+## Performance targets
+
+| Metric | Target |
+|---|---|
+| Time to first pitch | < 300 ms |
+| Per-frame CPU (midrange Android) | < 5 ms |
+| Per-frame CPU (iPhone 12+) | < 3 ms |
+| Audio-thread allocations | 0 |
 
 ## Requirements
 
-- React Native 0.75+ (New Architecture)
+- React Native 0.75+ (New Architecture / Bridgeless)
 - iOS 13+
 - Android API 24+, NDK r26+
