@@ -3,7 +3,8 @@ buildscript {
     kotlinVersion: "2.0.21",
     minSdkVersion: 24,
     compileSdkVersion: 36,
-    targetSdkVersion: 36
+    targetSdkVersion: 36,
+    ndkVersion: "26.3.11579264"
   ]
 
   ext.getExtOrDefault = { prop ->
@@ -36,14 +37,30 @@ android {
   namespace "com.tunerengine"
 
   compileSdkVersion getExtOrDefault("compileSdkVersion")
+  ndkVersion getExtOrDefault("ndkVersion")
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
     targetSdkVersion getExtOrDefault("targetSdkVersion")
+
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17"
+        abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
   }
 
   buildFeatures {
     buildConfig true
+    prefab true
   }
 
   buildTypes {
@@ -64,4 +81,5 @@ android {
 
 dependencies {
   implementation "com.facebook.react:react-android"
+  implementation "com.google.oboe:oboe:1.9.3"
 }

@@ -15,6 +15,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cpp-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Configure CMake
+        run: cmake -S cpp/tests -B cpp/build
+
+      - name: Build
+        run: cmake --build cpp/build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir cpp/build --output-on-failure
+
   lint:
     runs-on: ubuntu-latest
 
