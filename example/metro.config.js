@@ -26,6 +26,19 @@ const config = {
       'react-native-tuner-engine': root,
     },
     resolverMainFields: ['react-native', 'source', 'browser', 'main'],
+    resolveRequest: (context, moduleName, platform) => {
+      // Force react to always resolve from example/node_modules so there is
+      // only one copy of React in the bundle (two copies break hooks).
+      if (moduleName === 'react' || moduleName.startsWith('react/')) {
+        return {
+          filePath: require.resolve(moduleName, {
+            paths: [path.join(__dirname, 'node_modules')],
+          }),
+          type: 'sourceFile',
+        };
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
   },
 };
 

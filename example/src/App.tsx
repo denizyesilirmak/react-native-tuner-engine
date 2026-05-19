@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React from 'react';
 import {
   FlatList,
   SafeAreaView,
@@ -7,50 +7,28 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  type PitchEvent,
-  onPitch,
-  requestPermission,
-  start,
-  stop,
-} from 'react-native-tuner-engine';
+import { useTuner, type PitchEvent } from 'react-native-tuner-engine';
 
 type LogEntry = PitchEvent & { id: number };
 
+let logCounter = 0;
+
 export default function App() {
-  const [isRunning, setIsRunning] = useState(false);
-  const [latest, setLatest] = useState<PitchEvent | null>(null);
-  const [log, setLog] = useState<LogEntry[]>([]);
-  const counter = useRef(0);
+  const { start, stop, latest, isRunning, error } = useTuner({
+    noiseGateDb: -50,
+    confidenceThreshold: 0.75,
+  });
 
-  useEffect(() => {
-    const sub = onPitch((event) => {
-      setLatest(event);
-      if (event.hasPitch) {
-        setLog((prev) => [
-          { ...event, id: counter.current++ },
-          ...prev.slice(0, 49),
-        ]);
-      }
-    });
-    return () => sub.remove();
-  }, []);
+  const [log, setLog] = React.useState<LogEntry[]>([]);
 
-  const handleToggle = useCallback(async () => {
-    if (isRunning) {
-      await stop();
-      setIsRunning(false);
-    } else {
-      try {
-        const granted = await requestPermission();
-        if (!granted) return;
-        await start();
-        setIsRunning(true);
-      } catch (e) {
-        console.error('[TunerEngine] start error:', e);
-      }
+  React.useEffect(() => {
+    if (latest?.hasPitch) {
+      setLog((prev) => [
+        { ...latest, id: logCounter++ },
+        ...prev.slice(0, 49),
+      ]);
     }
-  }, [isRunning]);
+  }, [latest]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -74,13 +52,15 @@ export default function App() {
         </View>
       ) : (
         <View style={styles.pitchCard}>
-          <Text style={styles.noSignal}>— no signal —</Text>
+          <Text style={styles.noSignal}>
+            {error ? error.message : '— no signal —'}
+          </Text>
         </View>
       )}
 
       <TouchableOpacity
         style={[styles.button, isRunning && styles.buttonStop]}
-        onPress={handleToggle}
+        onPress={isRunning ? stop : start}
       >
         <Text style={styles.buttonText}>{isRunning ? 'Stop' : 'Start'}</Text>
       </TouchableOpacity>
@@ -114,7 +94,7 @@ const styles = StyleSheet.create({
   cents: { color: '#000', fontSize: 28, marginTop: 4 },
   freq: { color: '#000', fontSize: 16, marginTop: 4 },
   meta: { color: '#000', fontSize: 12, marginTop: 4 },
-  noSignal: { color: '#444', fontSize: 28 },
+  noSignal: { color: '#444', fontSize: 28, textAlign: 'center' },
   button: {
     backgroundColor: '#27ae60',
     paddingHorizontal: 48,
