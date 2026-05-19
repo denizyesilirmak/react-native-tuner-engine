@@ -20,8 +20,6 @@ export type TunerConfig = {
   maxFrequency?: number;
 };
 
-// RCTEventEmitter.sendEventWithName: routes through RCTDeviceEventEmitter on the JS side.
-// DeviceEventEmitter is the JS-side subscriber for these events on both platforms.
 const emitter = DeviceEventEmitter;
 
 export function configure(opts: TunerConfig): Promise<void> {
@@ -57,5 +55,14 @@ export function getStatus(): Object {
 }
 
 export function onPitch(callback: (event: PitchEvent) => void) {
-  return emitter.addListener('onPitch', callback);
+  // iOS Bridgeless (JSI direct): native calls global.__tunerEngineOnPitch
+  (global as any).__tunerEngineOnPitch = callback;
+  // Android + iOS old-arch: native emits via DeviceEventEmitter
+  const sub = emitter.addListener('onPitch', callback);
+  return {
+    remove: () => {
+      (global as any).__tunerEngineOnPitch = undefined;
+      sub.remove();
+    },
+  };
 }

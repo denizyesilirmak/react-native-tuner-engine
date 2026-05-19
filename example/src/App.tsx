@@ -25,7 +25,6 @@ export default function App() {
 
   useEffect(() => {
     const sub = onPitch((event) => {
-      console.log('[TunerEngine] onPitch event:', JSON.stringify(event));
       setLatest(event);
       if (event.hasPitch) {
         setLog((prev) => [
@@ -34,7 +33,6 @@ export default function App() {
         ]);
       }
     });
-    console.log('[TunerEngine] onPitch listener registered, sub:', sub);
     return () => sub.remove();
   }, []);
 
@@ -45,14 +43,8 @@ export default function App() {
     } else {
       try {
         const granted = await requestPermission();
-        console.log('[TunerEngine] permission granted:', granted);
-        if (!granted) {
-          console.warn('[TunerEngine] microphone permission denied');
-          return;
-        }
-        console.log('[TunerEngine] calling start...');
+        if (!granted) return;
         await start();
-        console.log('[TunerEngine] start resolved');
         setIsRunning(true);
       } catch (e) {
         console.error('[TunerEngine] start error:', e);

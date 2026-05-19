@@ -1,6 +1,7 @@
 #import "TunerBridge.h"
 #import "IosAudioSource.h"
 #include "AudioFrameDispatcher.hpp"
+#include "InstrumentPresets.hpp"
 #include <memory>
 
 @implementation TunerBridge {
@@ -29,8 +30,6 @@
 
   _dispatcher = std::make_unique<AudioFrameDispatcher>(fs, sr,
     [weakSelf](const PitchResult& r) {
-      static int callCount = 0;
-      if (++callCount <= 3) NSLog(@"[TunerBridge] dispatcher callback #%d hasPitch=%d freq=%.1f", callCount, r.hasPitch, r.frequency);
       __strong __typeof__(weakSelf) strongSelf = weakSelf;
       if (!strongSelf || !strongSelf.onPitch) return;
 
@@ -70,8 +69,6 @@
 
   __weak __typeof__(self) weakSelf = self;
   _audioSource.onSamples = ^(const float* samples, int count, float sampleRate) {
-    static int tapCount = 0;
-    if (++tapCount <= 3) NSLog(@"[TunerBridge] onSamples #%d count=%d", tapCount, count);
     __strong __typeof__(weakSelf) strongSelf = weakSelf;
     if (!strongSelf || !strongSelf->_dispatcher) return;
     strongSelf->_dispatcher->push(samples, count);
@@ -106,12 +103,13 @@
 }
 
 - (void)setInstrument:(NSString *)name {
-  // Instrument preset support added in M2
+  if (_dispatcher) {
+    FrequencyRange r = instrumentPreset(std::string([name UTF8String]));
+    _dispatcher->setFrequencyRange(r.minHz, r.maxHz);
+  }
 }
 
-- (void)setTemperament:(NSString *)name {
-  // Temperament support added in M2
-}
+- (void)setTemperament:(NSString *)name {}
 
 - (NSDictionary *)getStatus {
   return @{
