@@ -15,6 +15,9 @@ add_library(tuner_engine_core STATIC
     src/Pipeline.cpp
     src/TunerEngine.cpp
     src/AudioFrameDispatcher.cpp
+    src/CepstrumPitchDetector.cpp
+    src/PyinPitchDetector.cpp
+    src/EnsembleSelector.cpp
 )
 
 target_include_directories(tuner_engine_core PUBLIC include)

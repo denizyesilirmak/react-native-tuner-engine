@@ -1,6 +1,10 @@
 #include "NoteMapper.hpp"
 #include "TunerEngine.hpp"
 #include "YinPitchDetector.hpp"
+#include "PyinPitchDetector.hpp"
+#include "CepstrumPitchDetector.hpp"
+#include "EnsembleSelector.hpp"
+#include "BiquadHpf.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -275,6 +279,88 @@ static void testInstrumentPreset() {
     assert(result.noteName == "G");
 }
 
+// --- M3: per-detector and ensemble tests ---
+
+static void testDetectorOnSine(float freq, const std::string& label) {
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+    auto buf = generateSine(freq, sr, n);
+
+    BiquadHpf hpf(sr, 70.0f);
+    hpf.process(buf.data(), n);
+
+    YinPitchDetector  yin(sr, n);
+    PyinPitchDetector pyin(sr, n);
+
+    auto ry  = yin.detect(buf.data(), n, sr);
+    auto rpy = pyin.detect(buf.data(), n, sr);
+
+    std::cout << "detector " << label << " @ " << freq << " Hz:\n"
+              << "  YIN  freq=" << ry.frequency  << " conf=" << ry.confidence  << "\n"
+              << "  PYIN freq=" << rpy.frequency << " conf=" << rpy.confidence << "\n";
+
+    assert(ry.voiced);
+    assertNear(ry.frequency, freq, freq * 0.01f);  // within 1%
+
+    assert(rpy.voiced);
+    assertNear(rpy.frequency, freq, freq * 0.01f); // PYIN must agree with YIN
+}
+
+static void testEnsembleAgreementBonus() {
+    // When YIN and PYIN agree, the ensemble should produce confidence > either detector alone.
+    constexpr float sr  = 48000.0f;
+    constexpr int   n   = 4096;
+    constexpr float f0  = 196.0f; // G3
+
+    auto buf = generateSine(f0, sr, n * 6); // 6 continuous frames for HPF warmup
+
+    std::vector<std::unique_ptr<IPitchDetector>> detectors;
+    detectors.push_back(std::make_unique<YinPitchDetector>(sr, n));
+    detectors.push_back(std::make_unique<PyinPitchDetector>(sr, n));
+    detectors.push_back(std::make_unique<CepstrumPitchDetector>(sr, n));
+    EnsembleSelector ensemble(std::move(detectors));
+
+    BiquadHpf hpf(sr, 70.0f);
+
+    DetectorResult result;
+    for (int f = 0; f < 6; ++f) {
+        std::vector<float> frame(buf.begin() + f * n, buf.begin() + (f + 1) * n);
+        hpf.process(frame.data(), n);
+        result = ensemble.detect(frame.data(), n, sr);
+    }
+
+    std::cout << "ensemble G3: voiced=" << result.voiced
+              << " freq=" << result.frequency
+              << " conf=" << result.confidence << "\n";
+
+    assert(result.voiced);
+    assertNear(result.frequency, f0, f0 * 0.01f);
+    assert(result.confidence > 0.85f); // agreement bonus applied
+}
+
+static void testEnsembleOctaveSafety() {
+    // D3 (146.83 Hz): tau0 and 2*tau0 both fit in the search range.
+    // The ensemble must return the fundamental, not the sub-octave.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+
+    TunerEngine engine(sr, n);
+    auto buf = generateSine(146.83f, sr, n * 6);
+
+    PitchResult result;
+    for (int f = 0; f < 6; ++f) {
+        result = engine.process(buf.data() + f * n, n);
+    }
+
+    std::cout << "ensemble octave safety D3: "
+              << result.noteName << result.octave
+              << " freq=" << result.frequency << "\n";
+
+    assert(result.hasPitch);
+    assert(result.noteName == "D");
+    assert(result.octave == 3);
+}
+
 int main() {
     testNoteMapper();
 
@@ -294,6 +380,16 @@ int main() {
 
     testTunerEngineSilence();
     testTunerEngineQuietSignal();
+
+    // M3 per-detector and ensemble tests
+    testDetectorOnSine(82.41f,  "E2");
+    testDetectorOnSine(110.0f,  "A2");
+    testDetectorOnSine(146.83f, "D3");
+    testDetectorOnSine(196.0f,  "G3");
+    testDetectorOnSine(329.63f, "E4");
+    testDetectorOnSine(440.0f,  "A4");
+    testEnsembleAgreementBonus();
+    testEnsembleOctaveSafety();
 
     // M2 DSP hardening tests
     testPipelineCleanSine(82.41f,  "E", 2);
