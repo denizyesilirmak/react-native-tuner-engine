@@ -4,6 +4,8 @@ A React Native Turbo Module for real-time instrument pitch detection. The detect
 
 Requires React Native 0.75 or later with the New Architecture enabled.
 
+![Architecture Diagram](assets/diagram.png)
+
 ## How it works
 
 Audio is captured through platform-native APIs (AVAudioEngine on iOS, Oboe on Android) and fed into a lock-free SPSC ring buffer. A C++ worker thread drains the buffer in fixed-size frames, runs the audio through a preprocessing pipeline (high-pass filter, Hann window), detects pitch with the YIN algorithm, maps the result to a musical note, applies median smoothing and hysteresis, then fires a callback with the final `PitchResult`. The native module marshals that result to JS as an `onPitch` event.
@@ -88,7 +90,7 @@ Restricts the detection range to the frequency span of a given instrument. Reduc
 
 ```typescript
 setInstrument(name: string): void
-// "guitar" | "bass" | "violin" | "cello" | "viola" | "ukulele" | "mandolin" | "banjo" | "chromatic"
+// "guitar" | "bass" | "violin" | "cello" | "ukulele" | "chromatic"
 ```
 
 ### `setTemperament(name)`
@@ -108,10 +110,10 @@ getStatus(): { isRunning: boolean; engineReady: boolean }
 
 ### `onPitch(callback)`
 
-Subscribes to pitch events. Returns a subscription with a `remove()` method.
+Subscribes to pitch events. Returns an event subscription that should be removed when the component unmounts.
 
 ```typescript
-onPitch(callback: (event: PitchEvent) => void): { remove: () => void }
+onPitch(callback: (event: PitchEvent) => void): EventSubscription
 
 type PitchEvent = {
   hasPitch: boolean;
@@ -185,7 +187,3 @@ The shared C++ core (`cpp/`) is compiled as a static library on both platforms. 
 - React Native 0.75+ (New Architecture)
 - iOS 13+
 - Android API 24+, NDK r26+
-
-## License
-
-MIT
