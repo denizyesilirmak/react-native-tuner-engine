@@ -26,5 +26,6 @@
     "strict": true,
     "target": "ESNext",
     "verbatimModuleSyntax": true
-  }
+  },
+  "exclude": ["cpp", "example", "lib", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"]
 }
