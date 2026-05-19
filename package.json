@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A high-performance React Native Turbo Module for real-time instrument tuning with native audio processing and pitch detection.",
   "main": "./lib/module/index.js",
+  "source": "./src/index.tsx",
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
     ".": {
