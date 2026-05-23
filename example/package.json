@@ -13,6 +13,7 @@
     "@react-native-community/slider": "^5.2.0",
     "react": "19.2.3",
     "react-native": "0.85.0",
+    "react-native-safe-area-context": "^5.8.0",
     "react-native-tuner-engine": "*"
   },
   "devDependencies": {

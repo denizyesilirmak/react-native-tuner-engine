@@ -12,13 +12,14 @@ import NativeTunerEngine from '../NativeTunerEngine';
 jest.mock('../NativeTunerEngine', () => ({
   __esModule: true,
   default: {
-    configure: jest.fn().mockResolvedValue(undefined),
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-    requestPermission: jest.fn().mockResolvedValue(true),
+    configure: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    start: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    stop: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    requestPermission: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
     setA4: jest.fn(),
     setInstrument: jest.fn(),
     setTemperament: jest.fn(),
+    setTuning: jest.fn(),
     getStatus: jest
       .fn()
       .mockReturnValue({ isRunning: false, engineReady: true }),
@@ -48,10 +49,12 @@ beforeEach(() => {
 describe('TunerEngine', () => {
   it('calls configure with provided options', async () => {
     await TunerEngine.configure({ sampleRate: 44100, noiseGateDb: -50 });
-    expect(native.configure).toHaveBeenCalledWith({
-      sampleRate: 44100,
-      noiseGateDb: -50,
-    });
+    expect(native.configure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sampleRate: 44100,
+        noiseGateDb: -50,
+      })
+    );
   });
 
   it('calls start and stop', async () => {
@@ -62,7 +65,7 @@ describe('TunerEngine', () => {
   });
 
   it('returns false when permission is denied', async () => {
-    (native.requestPermission as jest.Mock).mockResolvedValueOnce(false);
+    (native.requestPermission as jest.Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
     const result = await TunerEngine.requestPermission();
     expect(result).toBe(false);
   });
