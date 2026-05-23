@@ -42,9 +42,23 @@
     return NO;
   }
 
-  [session setMode:AVAudioSessionModeMeasurement error:nil];
-  [session setPreferredSampleRate:48000.0 error:nil];
-  [session setPreferredIOBufferDuration:0.0213 error:nil];
+  [session setMode:AVAudioSessionModeMeasurement error:&sessionError];
+  if (sessionError) {
+    NSLog(@"[IosAudioSource] setMode error (non-fatal): %@", sessionError.localizedDescription);
+    sessionError = nil;
+  }
+
+  [session setPreferredSampleRate:48000.0 error:&sessionError];
+  if (sessionError) {
+    NSLog(@"[IosAudioSource] setPreferredSampleRate error (non-fatal): %@", sessionError.localizedDescription);
+    sessionError = nil;
+  }
+
+  [session setPreferredIOBufferDuration:0.0213 error:&sessionError];
+  if (sessionError) {
+    NSLog(@"[IosAudioSource] setPreferredIOBufferDuration error (non-fatal): %@", sessionError.localizedDescription);
+    sessionError = nil;
+  }
   [session setActive:YES error:&sessionError];
   if (sessionError) {
     if (error) *error = sessionError;

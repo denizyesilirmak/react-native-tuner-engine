@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -57,6 +58,7 @@ private:
     FloatRingBuffer<kRingCapacity> ring_;
     std::vector<float> frameBuffer_;
 
+    mutable std::mutex engineMutex_; // protects engine_ access across threads
     std::unique_ptr<TunerEngine> engine_;
 
     std::thread workerThread_;
