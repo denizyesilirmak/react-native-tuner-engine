@@ -64,6 +64,7 @@ export default function App() {
   const { start, stop, latest, isRunning, error } = useTuner({
     noiseGateDb: -50,
     confidenceThreshold: 0.75,
+    instrument: 'guitar',
   });
 
   const cents = latest?.hasPitch ? latest.cents : 0;
@@ -96,6 +97,21 @@ export default function App() {
           ? `${cents >= 0 ? '+' : ''}${cents.toFixed(1)} ¢`
           : ''}
       </Text>
+
+      {/* Nearest string */}
+      <View style={styles.stringRow}>
+        {latest?.hasPitch && latest.nearestString ? (
+          <>
+            <Text style={styles.stringName}>{latest.nearestString}</Text>
+            <Text style={[styles.stringDeviation, { color: centsColor(latest.stringDeviation) }]}>
+              {latest.stringDeviation >= 0 ? '+' : ''}
+              {latest.stringDeviation.toFixed(1)} ¢
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.stringPlaceholder}>— ¢</Text>
+        )}
+      </View>
 
       {/* Frequency + confidence */}
       <View style={styles.metaRow}>
@@ -184,6 +200,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 12,
     height: 28,
+  },
+  stringRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 16,
+    height: 32,
+  },
+  stringName: {
+    color: '#aaa',
+    fontSize: 22,
+    fontWeight: '600',
+  },
+  stringDeviation: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  stringPlaceholder: {
+    color: '#333',
+    fontSize: 16,
   },
   metaRow: {
     flexDirection: 'row',

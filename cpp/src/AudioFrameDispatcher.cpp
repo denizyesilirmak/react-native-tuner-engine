@@ -53,6 +53,22 @@ void AudioFrameDispatcher::setFrequencyRange(float minHz, float maxHz) {
     if (engine_) engine_->setFrequencyRange(minHz, maxHz);
 }
 
+void AudioFrameDispatcher::setInstrument(const std::string& name) {
+    if (engine_) engine_->setInstrument(name);
+}
+
+void AudioFrameDispatcher::setTuning(const std::string& name) {
+    if (engine_) engine_->setTuning(name);
+}
+
+void AudioFrameDispatcher::setPostProcessorConfig(PostProcessor::Config cfg) {
+    if (engine_) engine_->setPostProcessorConfig(cfg);
+}
+
+void AudioFrameDispatcher::setHpfCutoff(float hz) {
+    if (engine_) engine_->setHpfCutoff(hz);
+}
+
 void AudioFrameDispatcher::workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
         if (ring_.available() >= frameSize_) {

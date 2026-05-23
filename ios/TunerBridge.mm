@@ -1,7 +1,7 @@
 #import "TunerBridge.h"
 #import "IosAudioSource.h"
 #include "AudioFrameDispatcher.hpp"
-#include "InstrumentPresets.hpp"
+#include "PostProcessor.hpp"
 #include <memory>
 
 @implementation TunerBridge {
@@ -34,13 +34,15 @@
       if (!strongSelf || !strongSelf.onPitch) return;
 
       NSDictionary* event = @{
-        @"hasPitch":    @(r.hasPitch),
-        @"frequency":   @(r.frequency),
-        @"confidence":  @(r.confidence),
-        @"rmsDb":       @(r.rmsDb),
-        @"noteName":    @(r.noteName.c_str()),
-        @"octave":      @(r.octave),
-        @"cents":       @(r.cents)
+        @"hasPitch":         @(r.hasPitch),
+        @"frequency":        @(r.frequency),
+        @"confidence":       @(r.confidence),
+        @"rmsDb":            @(r.rmsDb),
+        @"noteName":         @(r.noteName.c_str()),
+        @"octave":           @(r.octave),
+        @"cents":            @(r.cents),
+        @"nearestString":    @(r.nearestString.c_str()),
+        @"stringDeviation":  @(r.stringDeviation)
       };
       strongSelf.onPitch(event);
     }
@@ -52,6 +54,13 @@
     _dispatcher->setFrequencyRange([opts[@"minFrequency"] floatValue], [opts[@"maxFrequency"] floatValue]);
   }
   if (opts[@"a4"]) _dispatcher->setA4([opts[@"a4"] floatValue]);
+  if (opts[@"hpfCutoffHz"]) _dispatcher->setHpfCutoff([opts[@"hpfCutoffHz"] floatValue]);
+  if (opts[@"emaAlpha"] || opts[@"hysteresisFrames"]) {
+    PostProcessor::Config cfg;
+    if (opts[@"emaAlpha"])          cfg.emaAlpha         = [opts[@"emaAlpha"] floatValue];
+    if (opts[@"hysteresisFrames"])  cfg.hysteresisFrames = [opts[@"hysteresisFrames"] intValue];
+    _dispatcher->setPostProcessorConfig(cfg);
+  }
 }
 
 - (void)startWithCompletion:(void(^)(NSError* _Nullable error))completion {
@@ -103,10 +112,11 @@
 }
 
 - (void)setInstrument:(NSString *)name {
-  if (_dispatcher) {
-    FrequencyRange r = instrumentPreset(std::string([name UTF8String]));
-    _dispatcher->setFrequencyRange(r.minHz, r.maxHz);
-  }
+  if (_dispatcher) _dispatcher->setInstrument(std::string([name UTF8String]));
+}
+
+- (void)setTuning:(NSString *)name {
+  if (_dispatcher) _dispatcher->setTuning(std::string([name UTF8String]));
 }
 
 - (void)setTemperament:(NSString *)name {}

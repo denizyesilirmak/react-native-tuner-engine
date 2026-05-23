@@ -1,8 +1,10 @@
 #include <jni.h>
 #include <android/log.h>
 #include <memory>
+#include <string>
 #include "AudioFrameDispatcher.hpp"
 #include "OboeAudioSource.h"
+#include "PostProcessor.hpp"
 
 #define LOG_TAG "TunerEngineJni"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -38,6 +40,8 @@ static void onPitchResult(const PitchResult& r) {
 
     jobject module = env->NewLocalRef(gModuleRef);
     if (module) {
+        jstring noteName     = env->NewStringUTF(r.noteName.c_str());
+        jstring nearestStr   = env->NewStringUTF(r.nearestString.c_str());
         env->CallVoidMethod(
             module,
             gOnPitchMethod,
@@ -45,10 +49,14 @@ static void onPitchResult(const PitchResult& r) {
             static_cast<jfloat>(r.frequency),
             static_cast<jfloat>(r.confidence),
             static_cast<jfloat>(r.rmsDb),
-            env->NewStringUTF(r.noteName.c_str()),
+            noteName,
             static_cast<jint>(r.octave),
-            static_cast<jfloat>(r.cents)
+            static_cast<jfloat>(r.cents),
+            nearestStr,
+            static_cast<jfloat>(r.stringDeviation)
         );
+        env->DeleteLocalRef(noteName);
+        env->DeleteLocalRef(nearestStr);
         env->DeleteLocalRef(module);
     }
 
@@ -76,7 +84,7 @@ Java_com_tunerengine_TunerEngineModule_nativeInit(
     // Cache the callback method ID
     jclass cls = env->GetObjectClass(thiz);
     gOnPitchMethod = env->GetMethodID(cls, "onPitchDetected",
-        "(ZFFFLjava/lang/String;IF)V");
+        "(ZFFFLjava/lang/String;IFLjava/lang/String;F)V");
 
     gDispatcher = std::make_unique<AudioFrameDispatcher>(
         static_cast<int>(frameSize),
@@ -150,6 +158,43 @@ Java_com_tunerengine_TunerEngineModule_nativeSetA4(
     JNIEnv* /*env*/, jobject /*thiz*/, jfloat hz
 ) {
     if (gDispatcher) gDispatcher->setA4(hz);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetHpfCutoff(
+    JNIEnv* /*env*/, jobject /*thiz*/, jfloat hz
+) {
+    if (gDispatcher) gDispatcher->setHpfCutoff(static_cast<float>(hz));
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetPostProcessorConfig(
+    JNIEnv* /*env*/, jobject /*thiz*/, jfloat emaAlpha, jint hysteresisFrames
+) {
+    if (gDispatcher) {
+        PostProcessor::Config cfg;
+        cfg.emaAlpha         = static_cast<float>(emaAlpha);
+        cfg.hysteresisFrames = static_cast<int>(hysteresisFrames);
+        gDispatcher->setPostProcessorConfig(cfg);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetInstrument(
+    JNIEnv* env, jobject /*thiz*/, jstring name
+) {
+    const char* nameChars = env->GetStringUTFChars(name, nullptr);
+    if (gDispatcher && nameChars) gDispatcher->setInstrument(std::string(nameChars));
+    env->ReleaseStringUTFChars(name, nameChars);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetTuning(
+    JNIEnv* env, jobject /*thiz*/, jstring name
+) {
+    const char* nameChars = env->GetStringUTFChars(name, nullptr);
+    if (gDispatcher && nameChars) gDispatcher->setTuning(std::string(nameChars));
+    env->ReleaseStringUTFChars(name, nameChars);
 }
 
 JNIEXPORT jboolean JNICALL

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PitchResult.hpp"
+#include "PostProcessor.hpp"
 #include "RingBuffer.hpp"
 #include "TunerEngine.hpp"
 
@@ -39,6 +40,10 @@ public:
     void setNoiseGateDb(float db);
     void setConfidenceThreshold(float value);
     void setFrequencyRange(float minHz, float maxHz);
+    void setInstrument(const std::string& name);
+    void setTuning(const std::string& name);
+    void setPostProcessorConfig(PostProcessor::Config cfg);
+    void setHpfCutoff(float hz);
 
 private:
     void workerLoop();
