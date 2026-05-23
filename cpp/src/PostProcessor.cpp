@@ -7,7 +7,10 @@
 static constexpr float kA4 = 440.0f;
 
 PostProcessor::PostProcessor() : cfg_{} {}
-PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {}
+PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
+    cfg_.emaAlpha = std::clamp(cfg_.emaAlpha, 0.01f, 1.0f);
+    cfg_.hysteresisFrames = std::max(cfg_.hysteresisFrames, 1);
+}
 
 void PostProcessor::reset() {
     std::fill(medianBuf_, medianBuf_ + kMedianLen, 0.0f);
@@ -20,6 +23,8 @@ void PostProcessor::reset() {
 }
 
 void PostProcessor::setConfig(Config cfg) {
+    cfg.emaAlpha = std::clamp(cfg.emaAlpha, 0.01f, 1.0f);
+    cfg.hysteresisFrames = std::max(cfg.hysteresisFrames, 1);
     cfg_ = cfg;
 }
 
