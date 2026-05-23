@@ -9,6 +9,8 @@
         "package.json",
         "android",
         "!android/build",
+        "cpp/src/**",
+        "cpp/include/**",
         "src/*.ts",
         "src/*.tsx",
         "example/package.json",
@@ -17,7 +19,7 @@
         "!example/android/build",
         "!example/android/app/build"
       ],
-      "outputs": []
+      "outputs": ["example/android/app/build/outputs/**"]
     },
     "build:ios": {
       "env": [
@@ -30,6 +32,8 @@
         "package.json",
         "*.podspec",
         "ios",
+        "cpp/src/**",
+        "cpp/include/**",
         "src/*.ts",
         "src/*.tsx",
         "example/package.json",
@@ -37,7 +41,7 @@
         "!example/ios/build",
         "!example/ios/Pods"
       ],
-      "outputs": []
+      "outputs": ["example/ios/build/**"]
     }
   }
 }
