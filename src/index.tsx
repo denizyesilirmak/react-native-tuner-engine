@@ -6,4 +6,5 @@ export type {
   PitchEvent,
   Temperament,
   TunerConfig,
+  TuningPreset,
 } from './types';

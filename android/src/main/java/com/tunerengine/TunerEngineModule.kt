@@ -25,6 +25,16 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     val a4 = opts?.getDouble("a4")?.toFloat() ?: 440.0f
 
     nativeConfigure(sampleRate, frameSize, noiseGateDb, confidenceThreshold, minFrequency, maxFrequency, a4)
+
+    val hpfCutoffHz = opts?.getDouble("hpfCutoffHz")?.toFloat()
+    if (hpfCutoffHz != null) nativeSetHpfCutoff(hpfCutoffHz)
+
+    val emaAlpha = opts?.getDouble("emaAlpha")?.toFloat()
+    val hysteresisFrames = if (opts?.hasKey("hysteresisFrames") == true) opts.getInt("hysteresisFrames") else null
+    if (emaAlpha != null || hysteresisFrames != null) {
+      nativeSetPostProcessorConfig(emaAlpha ?: 0.35f, hysteresisFrames ?: 3)
+    }
+
     promise.resolve(null)
   }
 
@@ -45,7 +55,11 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   }
 
   override fun setInstrument(name: String) {
-    // Instrument preset support added in M2
+    nativeSetInstrument(name)
+  }
+
+  override fun setTuning(name: String) {
+    nativeSetTuning(name)
   }
 
   override fun setTemperament(name: String) {
@@ -91,7 +105,9 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     rmsDb: Float,
     noteName: String,
     octave: Int,
-    cents: Float
+    cents: Float,
+    nearestString: String,
+    stringDeviation: Float
   ) {
     val params = Arguments.createMap().apply {
       putBoolean("hasPitch", hasPitch)
@@ -101,6 +117,8 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
       putString("noteName", noteName)
       putInt("octave", octave)
       putDouble("cents", cents.toDouble())
+      putString("nearestString", nearestString)
+      putDouble("stringDeviation", stringDeviation.toDouble())
     }
 
     reactApplicationContext
@@ -119,6 +137,10 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     a4: Float
   )
   private external fun nativeSetA4(hz: Float)
+  private external fun nativeSetInstrument(name: String)
+  private external fun nativeSetTuning(name: String)
+  private external fun nativeSetHpfCutoff(hz: Float)
+  private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
   private external fun nativeIsRunning(): Boolean
 
   companion object {

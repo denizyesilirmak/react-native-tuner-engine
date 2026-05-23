@@ -60,6 +60,10 @@ RCT_EXPORT_MODULE(TunerEngine)
   [_tunerBridge setInstrument:name];
 }
 
+- (void)setTuning:(NSString *)name {
+  [_tunerBridge setTuning:name];
+}
+
 - (void)setTemperament:(NSString *)name {
   [_tunerBridge setTemperament:name];
 }

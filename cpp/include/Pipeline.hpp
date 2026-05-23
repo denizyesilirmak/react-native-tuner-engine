@@ -7,12 +7,13 @@
 #include "PitchResult.hpp"
 #include "PostProcessor.hpp"
 #include "SnrEstimator.hpp"
+#include "StringMatcher.hpp"
 #include "Window.hpp"
 
 #include <memory>
 #include <vector>
 
-// Ordered DSP chain: HPF → Hann window → IPitchDetector → SNR weighting → PostProcessor → NoteMapper.
+// Ordered DSP chain: HPF → Hann window → IPitchDetector → SNR weighting → PostProcessor → NoteMapper → StringMatcher.
 class Pipeline {
 public:
     Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector);
@@ -24,7 +25,9 @@ public:
     void setConfidenceThreshold(float threshold);
     void setFrequencyRange(float minHz, float maxHz);
     void setInstrument(const std::string& name);
+    void setTuning(const std::string& name);   // e.g. "guitar_standard", "" to disable
     void setPostProcessorConfig(PostProcessor::Config cfg);
+    void setHpfCutoff(float hz);
 
 private:
     int frameSize_;
@@ -39,6 +42,7 @@ private:
     SnrEstimator snr_;
     PostProcessor postProcessor_;
     NoteMapper noteMapper_;
+    StringMatcher stringMatcher_;
 
     std::vector<float> workBuffer_; // HPF + windowing happen here (copy of input)
 

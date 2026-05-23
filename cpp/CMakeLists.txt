@@ -18,6 +18,7 @@ add_library(tuner_engine_core STATIC
     src/CepstrumPitchDetector.cpp
     src/PyinPitchDetector.cpp
     src/EnsembleSelector.cpp
+    src/StringMatcher.cpp
 )
 
 target_include_directories(tuner_engine_core PUBLIC include)

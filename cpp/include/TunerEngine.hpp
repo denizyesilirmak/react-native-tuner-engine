@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pipeline.hpp"
+#include "PostProcessor.hpp"
 #include "PitchResult.hpp"
 
 #include <memory>
@@ -19,6 +20,9 @@ public:
     void setConfidenceThreshold(float value);
     void setFrequencyRange(float minFrequency, float maxFrequency);
     void setInstrument(const std::string& name);
+    void setTuning(const std::string& name);
+    void setPostProcessorConfig(PostProcessor::Config cfg);
+    void setHpfCutoff(float hz);
 
 private:
     std::unique_ptr<Pipeline> pipeline_;
