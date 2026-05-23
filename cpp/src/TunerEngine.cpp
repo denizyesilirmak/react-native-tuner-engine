@@ -2,6 +2,7 @@
 #include "CepstrumPitchDetector.hpp"
 #include "EnsembleSelector.hpp"
 #include "PyinPitchDetector.hpp"
+#include "TuningPresets.hpp"
 #include "YinPitchDetector.hpp"
 
 #include <memory>
@@ -39,4 +40,20 @@ void TunerEngine::setFrequencyRange(float minFrequency, float maxFrequency) {
 
 void TunerEngine::setInstrument(const std::string& name) {
     pipeline_->setInstrument(name);
+    // Auto-apply the default tuning for this instrument (e.g. "guitar" → "guitar_standard").
+    // Can be overridden afterwards with an explicit setTuning() call.
+    const std::string defaultTuning = defaultTuningForInstrument(name);
+    pipeline_->setTuning(defaultTuning);
+}
+
+void TunerEngine::setTuning(const std::string& name) {
+    pipeline_->setTuning(name);
+}
+
+void TunerEngine::setPostProcessorConfig(PostProcessor::Config cfg) {
+    pipeline_->setPostProcessorConfig(cfg);
+}
+
+void TunerEngine::setHpfCutoff(float hz) {
+    pipeline_->setHpfCutoff(hz);
 }

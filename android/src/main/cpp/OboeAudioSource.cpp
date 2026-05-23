@@ -12,6 +12,7 @@ OboeAudioSource::~OboeAudioSource() {
     stop();
 }
 
+
 bool OboeAudioSource::openStream() {
     oboe::AudioStreamBuilder builder;
     builder.setDirection(oboe::Direction::Input)
@@ -60,6 +61,10 @@ bool OboeAudioSource::start() {
 }
 
 void OboeAudioSource::stop() {
+    stopped_.store(true, std::memory_order_relaxed);
+    if (restartThread_.joinable()) {
+        restartThread_.join();
+    }
     if (stream_) {
         stream_->requestStop();
         stream_->close();
@@ -85,6 +90,12 @@ oboe::DataCallbackResult OboeAudioSource::onAudioReady(
 
 void OboeAudioSource::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result error) {
     LOGE("Oboe stream error after close: %s — attempting restart", oboe::convertToText(error));
-    // Restart on a different thread to avoid deadlock
-    std::thread([this]() { start(); }).detach();
+    if (stopped_.load(std::memory_order_relaxed)) return;
+    // Restart on a separate thread to avoid deadlock; join in stop()/destructor
+    if (restartThread_.joinable()) restartThread_.join();
+    restartThread_ = std::thread([this]() {
+        if (!stopped_.load(std::memory_order_relaxed)) {
+            start();
+        }
+    });
 }

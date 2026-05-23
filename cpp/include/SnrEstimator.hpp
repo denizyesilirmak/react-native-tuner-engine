@@ -17,6 +17,5 @@ public:
 
 private:
     float noiseFloorLinear_;
-    static constexpr float kDecayAlpha   = 0.9990f; // how fast floor decays toward signal
     static constexpr float kAttackAlpha  = 0.0100f; // how fast floor follows signal downward
 };

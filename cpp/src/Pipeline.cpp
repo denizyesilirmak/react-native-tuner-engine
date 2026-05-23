@@ -60,6 +60,16 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     PitchResult result = noteMapper_.map(pp.frequency, weightedConf, rmsDb);
     // Override cents with the hysteresis-stabilised value from PostProcessor
     result.cents = pp.cents;
+
+    // --- String matching (optional, only when a TuningProfile is active) ---
+    if (stringMatcher_.hasTuning()) {
+        auto m = stringMatcher_.match(pp.frequency);
+        if (m) {
+            result.nearestString    = m->name;
+            result.stringDeviation  = m->deviationCents;
+        }
+    }
+
     return result;
 }
 
@@ -84,8 +94,16 @@ void Pipeline::setInstrument(const std::string& name) {
     detector_->setFrequencyRange(r.minHz, r.maxHz);
 }
 
+void Pipeline::setTuning(const std::string& name) {
+    stringMatcher_.setTuning(name.empty() ? nullptr : tuningPreset(name));
+}
+
 void Pipeline::setPostProcessorConfig(PostProcessor::Config cfg) {
     postProcessor_.setConfig(cfg);
+}
+
+void Pipeline::setHpfCutoff(float hz) {
+    hpf_ = BiquadHpf(sampleRate_, hz);
 }
 
 float Pipeline::calculateRmsDb(const float* input, int n) const {

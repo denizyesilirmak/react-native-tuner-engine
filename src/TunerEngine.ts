@@ -6,6 +6,7 @@ import type {
   PitchEvent,
   Temperament,
   TunerConfig,
+  TuningPreset,
 } from './types';
 
 type PitchCallback = (event: PitchEvent) => void;
@@ -38,6 +39,10 @@ class TunerEngine {
 
   setTemperament(name: Temperament): void {
     NativeTunerEngine.setTemperament(name);
+  }
+
+  setTuning(name: TuningPreset | ''): void {
+    NativeTunerEngine.setTuning(name);
   }
 
   getStatus(): EngineStatus {

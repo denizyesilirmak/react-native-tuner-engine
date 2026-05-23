@@ -68,12 +68,17 @@ const { start, stop, latest, isRunning, error } = useTuner({
   // All fields optional — defaults shown
   sampleRate?: number;          // 48000
   frameSize?: number;           // 2048
-  noiseGateDb?: number;         // -55
+  noiseGateDb?: number;         // -55 dBFS
   confidenceThreshold?: number; // 0.75  (0–1)
   minFrequency?: number;        // 60 Hz
   maxFrequency?: number;        // 1200 Hz
   instrument?: Instrument;      // 'chromatic'
   a4?: number;                  // 440 Hz
+
+  // DSP tuning
+  emaAlpha?: number;            // 0.35  — smoothing (0.05 = slow/stable, 1.0 = instant)
+  hysteresisFrames?: number;    // 3     — frames before a note change is confirmed (1–10)
+  hpfCutoffHz?: number;         // 70 Hz — high-pass filter cutoff (30 for bass, 100 for violin)
 });
 ```
 
@@ -119,12 +124,16 @@ type PitchEvent = {
 };
 
 type TunerConfig = {
-  sampleRate?: number;
-  frameSize?: number;
-  noiseGateDb?: number;
-  confidenceThreshold?: number;
-  minFrequency?: number;
-  maxFrequency?: number;
+  sampleRate?: number;          // default 48000
+  frameSize?: number;           // default 2048
+  noiseGateDb?: number;         // default -55 dBFS
+  confidenceThreshold?: number; // default 0.75
+  minFrequency?: number;        // default 60 Hz
+  maxFrequency?: number;        // default 1200 Hz
+  a4?: number;                  // default 440 Hz
+  emaAlpha?: number;            // default 0.35 — PostProcessor smoothing (0.05–1.0)
+  hysteresisFrames?: number;    // default 3    — frames to confirm a note change (1–10)
+  hpfCutoffHz?: number;         // default 70   — high-pass filter cutoff in Hz (20–300)
 };
 
 type Instrument =
@@ -149,7 +158,7 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 
 | Stage | Class | Notes |
 |---|---|---|
-| High-pass filter | `BiquadHpf` | Direct-Form II Transposed, 70 Hz cutoff, Q 0.707 |
+| High-pass filter | `BiquadHpf` | Direct-Form II Transposed, 70 Hz cutoff (configurable), Q 0.707 |
 | Windowing | `Window` | Hann window, precomputed coefficients |
 | Pitch detection | `EnsembleSelector` | Runs YIN, PYIN, and cepstrum; votes by agreement within 1 semitone |
 | — detector 1 | `YinPitchDetector` | YIN with parabolic interpolation |
@@ -157,7 +166,7 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 | — detector 3 | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; SNR-based confidence |
 | Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
 | SNR estimation | `SnrEstimator` | Signal RMS vs. noise-floor EMA |
-| Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing, note-transition hysteresis |
+| Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing (configurable), note-transition hysteresis (configurable) |
 | Dispatch | `AudioFrameDispatcher` | SPSC lock-free queue, dedicated worker thread |
 
 ## Performance targets
