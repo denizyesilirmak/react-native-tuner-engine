@@ -1,12 +1,14 @@
 #pragma once
 
 #include "PitchResult.hpp"
+#include "PostProcessor.hpp"
 #include "RingBuffer.hpp"
 #include "TunerEngine.hpp"
 
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -39,6 +41,10 @@ public:
     void setNoiseGateDb(float db);
     void setConfidenceThreshold(float value);
     void setFrequencyRange(float minHz, float maxHz);
+    void setInstrument(const std::string& name);
+    void setTuning(const std::string& name);
+    void setPostProcessorConfig(PostProcessor::Config cfg);
+    void setHpfCutoff(float hz);
 
 private:
     void workerLoop();
@@ -52,6 +58,7 @@ private:
     FloatRingBuffer<kRingCapacity> ring_;
     std::vector<float> frameBuffer_;
 
+    mutable std::mutex engineMutex_; // protects engine_ access across threads
     std::unique_ptr<TunerEngine> engine_;
 
     std::thread workerThread_;

@@ -12,12 +12,10 @@ float SnrEstimator::update(float rmsLinear) {
     rmsLinear = std::max(rmsLinear, kMinLinear);
 
     if (rmsLinear < noiseFloorLinear_) {
-        // Signal dropped below floor — pull floor down quickly
+        // Signal dropped below floor — pull floor down quickly to track silence
         noiseFloorLinear_ = kAttackAlpha * rmsLinear + (1.0f - kAttackAlpha) * noiseFloorLinear_;
-    } else {
-        // Signal above floor — let floor decay slowly upward (tracks long-term quiet level)
-        noiseFloorLinear_ = kDecayAlpha * noiseFloorLinear_ + (1.0f - kDecayAlpha) * rmsLinear;
     }
+    // Floor never rises during active signal — prevents SNR from collapsing on sustained notes
 
     noiseFloorLinear_ = std::max(noiseFloorLinear_, kMinLinear);
     return 20.0f * std::log10(rmsLinear / noiseFloorLinear_);

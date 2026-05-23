@@ -16,4 +16,9 @@ struct PitchResult
 
     float targetFrequency = 0.0f;
     float cents = 0.0f;
+
+    // Set when a TuningProfile is active (via Pipeline::setTuning).
+    // Empty string means no tuning is configured.
+    std::string nearestString;       // e.g. "E2", "A2"
+    float       stringDeviation = 0.0f; // cents from that string's target, signed
 };

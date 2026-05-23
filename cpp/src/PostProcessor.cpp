@@ -1,13 +1,15 @@
 #include "PostProcessor.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 
 static constexpr float kA4 = 440.0f;
 
 PostProcessor::PostProcessor() : cfg_{} {}
-PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {}
+PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
+    cfg_.emaAlpha = std::clamp(cfg_.emaAlpha, 0.01f, 1.0f);
+    cfg_.hysteresisFrames = std::max(cfg_.hysteresisFrames, 1);
+}
 
 void PostProcessor::reset() {
     std::fill(medianBuf_, medianBuf_ + kMedianLen, 0.0f);
@@ -20,14 +22,27 @@ void PostProcessor::reset() {
 }
 
 void PostProcessor::setConfig(Config cfg) {
+    cfg.emaAlpha = std::clamp(cfg.emaAlpha, 0.01f, 1.0f);
+    cfg.hysteresisFrames = std::max(cfg.hysteresisFrames, 1);
     cfg_ = cfg;
 }
 
 float PostProcessor::median5() const {
-    std::array<float, kMedianLen> sorted;
-    std::copy(medianBuf_, medianBuf_ + kMedianLen, sorted.begin());
-    std::sort(sorted.begin(), sorted.end());
-    return sorted[kMedianLen / 2];
+    // Optimal median-of-5 via sorting network (6 comparisons, no allocation)
+    float a = medianBuf_[0], b = medianBuf_[1], c = medianBuf_[2],
+          d = medianBuf_[3], e = medianBuf_[4];
+    // Sort pairs
+    if (a > b) std::swap(a, b);
+    if (c > d) std::swap(c, d);
+    // Eliminate the lowest of the two pairs
+    if (a > c) { std::swap(a, c); std::swap(b, d); }
+    // Now a is the global minimum, discard it. Median is among {b, c, d, e}
+    // Find median of {b, c, d, e} by eliminating max and min
+    if (b > e) std::swap(b, e);
+    // Median is middle of {b, c, d}
+    if (b > c) std::swap(b, c);
+    if (c > d) std::swap(c, d);
+    return std::min(c, e);
 }
 
 int PostProcessor::freqToMidi(float hz) {

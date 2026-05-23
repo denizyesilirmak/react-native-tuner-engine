@@ -60,6 +60,10 @@ RCT_EXPORT_MODULE(TunerEngine)
   [_tunerBridge setInstrument:name];
 }
 
+- (void)setTuning:(NSString *)name {
+  [_tunerBridge setTuning:name];
+}
+
 - (void)setTemperament:(NSString *)name {
   [_tunerBridge setTemperament:name];
 }
@@ -103,8 +107,15 @@ RCT_EXPORT_MODULE(TunerEngine)
     std::string note  = std::string([event[@"noteName"] UTF8String]);
     int octave        = [event[@"octave"] intValue];
     double cents      = [event[@"cents"] doubleValue];
+    std::string nearestStr = event[@"nearestString"]
+        ? std::string([event[@"nearestString"] UTF8String]) : std::string();
+    double stringDev  = [event[@"stringDeviation"] doubleValue];
 
-    jsInvoker->invokeAsync([=](facebook::jsi::Runtime& rt) {
+    jsInvoker->invokeAsync([weakSelf, hasPitch, frequency, confidence, rmsDb,
+                            note, octave, cents, nearestStr, stringDev](facebook::jsi::Runtime& rt) {
+      __strong __typeof__(weakSelf) innerSelf = weakSelf;
+      if (!innerSelf) return; // Module deallocated — bail out
+
       auto cb = rt.global().getProperty(rt, "__tunerEngineOnPitch");
       if (!cb.isObject()) return;
       auto fn = cb.asObject(rt);
@@ -119,6 +130,9 @@ RCT_EXPORT_MODULE(TunerEngine)
           facebook::jsi::String::createFromUtf8(rt, note));
       obj.setProperty(rt, "octave",     facebook::jsi::Value(octave));
       obj.setProperty(rt, "cents",      facebook::jsi::Value(cents));
+      obj.setProperty(rt, "nearestString",
+          facebook::jsi::String::createFromUtf8(rt, nearestStr));
+      obj.setProperty(rt, "stringDeviation", facebook::jsi::Value(stringDev));
 
       fn.asFunction(rt).call(rt, std::move(obj));
     });

@@ -19,6 +19,7 @@ BiquadHpf::BiquadHpf(float sampleRate, float cutoffHz, float q) {
 }
 
 void BiquadHpf::process(float* frame, int n) {
+    if (!frame || n <= 0) return;
     for (int i = 0; i < n; ++i) {
         const float x = frame[i];
         const float y = b0_ * x + w1_;
