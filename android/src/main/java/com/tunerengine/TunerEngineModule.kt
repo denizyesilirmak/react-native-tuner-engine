@@ -9,6 +9,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableNativeMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.facebook.react.modules.core.PermissionAwareActivity
+import com.facebook.react.modules.core.PermissionListener
 
 class TunerEngineModule(reactContext: ReactApplicationContext) :
   NativeTunerEngineSpec(reactContext) {
@@ -39,9 +41,13 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   }
 
   override fun start(promise: Promise) {
-    nativeStart()
-    isRunning = true
-    promise.resolve(null)
+    val started = nativeStart()
+    if (started) {
+      isRunning = true
+      promise.resolve(null)
+    } else {
+      promise.reject("START_ERROR", "Failed to start audio capture")
+    }
   }
 
   override fun stop(promise: Promise) {
@@ -79,10 +85,26 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
       return
     }
 
-    ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.RECORD_AUDIO), 0)
-    // For a proper permission result callback, integrate with the activity's onRequestPermissionsResult.
-    // For M1, resolve optimistically after request.
-    promise.resolve(false)
+    val permissionAwareActivity = activity as? PermissionAwareActivity
+    if (permissionAwareActivity == null) {
+      promise.resolve(false)
+      return
+    }
+
+    permissionAwareActivity.requestPermissions(
+      arrayOf(Manifest.permission.RECORD_AUDIO),
+      REQUEST_PERMISSION_CODE,
+      PermissionListener { requestCode, _, grantResults ->
+        if (requestCode == REQUEST_PERMISSION_CODE) {
+          val granted = grantResults.isNotEmpty() &&
+              grantResults[0] == PackageManager.PERMISSION_GRANTED
+          promise.resolve(granted)
+          true
+        } else {
+          false
+        }
+      }
+    )
   }
 
   override fun getStatus(): ReadableMap {
@@ -128,7 +150,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
 
   // JNI methods
   private external fun nativeInit(sampleRate: Float, frameSize: Int)
-  private external fun nativeStart()
+  private external fun nativeStart(): Boolean
   private external fun nativeStop()
   private external fun nativeConfigure(
     sampleRate: Float, frameSize: Int,
@@ -145,6 +167,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = NativeTunerEngineSpec.NAME
+    private const val REQUEST_PERMISSION_CODE = 1001
 
     init {
       System.loadLibrary("tunerengine")

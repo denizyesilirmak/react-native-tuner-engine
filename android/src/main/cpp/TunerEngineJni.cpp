@@ -12,11 +12,11 @@
 
 // Globals — one engine per process (single-instance module assumption)
 static std::unique_ptr<AudioFrameDispatcher> gDispatcher;
-static std::unique_ptr<OboeAudioSource> gAudioSource;
+static std::shared_ptr<OboeAudioSource> gAudioSource;
 
 // JNI back-reference for pitch callbacks
 static JavaVM* gJvm = nullptr;
-static jweak gModuleRef = nullptr; // weak ref to TunerEngineModule kotlin object
+static jobject gModuleRef = nullptr; // strong global ref to TunerEngineModule kotlin object
 static jmethodID gOnPitchMethod = nullptr;
 
 // Called from C++ worker thread; marshals PitchResult → Java
@@ -38,12 +38,11 @@ static void onPitchResult(const PitchResult& r) {
         return;
     }
 
-    jobject module = env->NewLocalRef(gModuleRef);
-    if (module) {
+    if (gModuleRef) {
         jstring noteName     = env->NewStringUTF(r.noteName.c_str());
         jstring nearestStr   = env->NewStringUTF(r.nearestString.c_str());
         env->CallVoidMethod(
-            module,
+            gModuleRef,
             gOnPitchMethod,
             static_cast<jboolean>(r.hasPitch),
             static_cast<jfloat>(r.frequency),
@@ -57,7 +56,6 @@ static void onPitchResult(const PitchResult& r) {
         );
         env->DeleteLocalRef(noteName);
         env->DeleteLocalRef(nearestStr);
-        env->DeleteLocalRef(module);
     }
 
     if (didAttach) {
@@ -77,9 +75,9 @@ Java_com_tunerengine_TunerEngineModule_nativeInit(
     JNIEnv* env, jobject thiz,
     jfloat sampleRate, jint frameSize
 ) {
-    // Store weak ref to the Kotlin module object for callbacks
-    if (gModuleRef) env->DeleteWeakGlobalRef(gModuleRef);
-    gModuleRef = env->NewWeakGlobalRef(thiz);
+    // Store strong global ref to the Kotlin module object for callbacks
+    if (gModuleRef) env->DeleteGlobalRef(gModuleRef);
+    gModuleRef = env->NewGlobalRef(thiz);
 
     // Cache the callback method ID
     jclass cls = env->GetObjectClass(thiz);
@@ -95,7 +93,7 @@ Java_com_tunerengine_TunerEngineModule_nativeInit(
     LOGI("nativeInit: sampleRate=%.0f frameSize=%d", (float)sampleRate, (int)frameSize);
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeStart(
     JNIEnv* env, jobject thiz
 ) {
@@ -103,7 +101,7 @@ Java_com_tunerengine_TunerEngineModule_nativeStart(
         Java_com_tunerengine_TunerEngineModule_nativeInit(env, thiz, 48000.0f, 2048);
     }
 
-    gAudioSource = std::make_unique<OboeAudioSource>(
+    gAudioSource = std::make_shared<OboeAudioSource>(
         [](const float* samples, int count, float /*sr*/) {
             if (gDispatcher) gDispatcher->push(samples, count);
         }
@@ -112,7 +110,7 @@ Java_com_tunerengine_TunerEngineModule_nativeStart(
     if (!gAudioSource->start()) {
         LOGE("Failed to start Oboe stream");
         gAudioSource.reset();
-        return;
+        return JNI_FALSE;
     }
 
     // Sync dispatcher to actual sample rate reported by Oboe
@@ -122,16 +120,22 @@ Java_com_tunerengine_TunerEngineModule_nativeStart(
     }
 
     LOGI("Audio capture started");
+    return JNI_TRUE;
 }
 
 JNIEXPORT void JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeStop(
-    JNIEnv* /*env*/, jobject /*thiz*/
+    JNIEnv* env, jobject /*thiz*/
 ) {
     if (gDispatcher) gDispatcher->stop();
     if (gAudioSource) {
         gAudioSource->stop();
         gAudioSource.reset();
+    }
+    // Release global ref to allow GC of the module object
+    if (gModuleRef) {
+        env->DeleteGlobalRef(gModuleRef);
+        gModuleRef = nullptr;
     }
     LOGI("Audio capture stopped");
 }

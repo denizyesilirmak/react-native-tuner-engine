@@ -3,11 +3,14 @@
 #include <oboe/Oboe.h>
 #include <functional>
 #include <memory>
+#include <atomic>
+#include <thread>
 
 // Oboe-based microphone capture.
 // The onSamples callback is invoked on the Oboe real-time audio thread —
 // must not block, lock, or allocate.
-class OboeAudioSource : public oboe::AudioStreamCallback {
+class OboeAudioSource : public oboe::AudioStreamCallback,
+                        public std::enable_shared_from_this<OboeAudioSource> {
 public:
     using SamplesCallback = std::function<void(const float* samples, int count, float sampleRate)>;
 
@@ -33,4 +36,6 @@ private:
     SamplesCallback callback_;
     std::shared_ptr<oboe::AudioStream> stream_;
     float sampleRate_{48000.0f};
+    std::atomic<bool> stopped_{false};
+    std::thread restartThread_;
 };
