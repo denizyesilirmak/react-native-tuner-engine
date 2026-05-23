@@ -33,6 +33,7 @@ void AudioFrameDispatcher::push(const float* samples, int count) {
 }
 
 void AudioFrameDispatcher::setSampleRate(float sampleRate) {
+    if (sampleRate <= 0.0f) return;
     std::lock_guard<std::mutex> lock(engineMutex_);
     sampleRate_ = sampleRate;
     engine_ = std::make_unique<TunerEngine>(sampleRate, frameSize_);
