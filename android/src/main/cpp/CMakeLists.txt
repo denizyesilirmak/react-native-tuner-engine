@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Pull in the shared C++ core
 add_subdirectory(
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../../cpp
   ${CMAKE_BINARY_DIR}/tuner_engine_core
 )
 

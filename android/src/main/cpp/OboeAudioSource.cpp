@@ -15,13 +15,13 @@ OboeAudioSource::~OboeAudioSource() {
 
 bool OboeAudioSource::openStream() {
     oboe::AudioStreamBuilder builder;
-    builder.setDirection(oboe::Direction::Input)
-           .setPerformanceMode(oboe::PerformanceMode::LowLatency)
-           .setSharingMode(oboe::SharingMode::Exclusive)
-           .setFormat(oboe::AudioFormat::Float)
-           .setChannelCount(oboe::ChannelCount::Mono)
-           .setSampleRate(48000)
-           .setCallback(this);
+    builder.setDirection(oboe::Direction::Input);
+    builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+    builder.setSharingMode(oboe::SharingMode::Exclusive);
+    builder.setFormat(oboe::AudioFormat::Float);
+    builder.setChannelCount(oboe::ChannelCount::Mono);
+    builder.setSampleRate(48000);
+    builder.setCallback(this);
 
     oboe::Result result = builder.openStream(stream_);
 
