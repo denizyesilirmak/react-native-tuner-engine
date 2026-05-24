@@ -66,6 +66,9 @@
   if (opts[@"onsetDetection"]) {
     _dispatcher->setOnsetDetectionEnabled([opts[@"onsetDetection"] boolValue]);
   }
+  if (opts[@"adaptiveFrameSize"] != nil) {
+    _dispatcher->setAdaptiveFrameSize([opts[@"adaptiveFrameSize"] boolValue]);
+  }
 }
 
 - (void)startWithCompletion:(void(^)(NSError* _Nullable error))completion {
@@ -124,7 +127,9 @@
   if (_dispatcher) _dispatcher->setTuning(std::string([name UTF8String]));
 }
 
-- (void)setTemperament:(NSString *)name {}
+- (void)setTemperament:(NSString *)name {
+  if (_dispatcher) _dispatcher->setTemperament(std::string([name UTF8String]));
+}
 
 - (NSDictionary *)getStatus {
   return @{

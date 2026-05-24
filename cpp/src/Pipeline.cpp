@@ -103,6 +103,10 @@ void Pipeline::setTuning(const std::string& name) {
     stringMatcher_.setTuning(name.empty() ? nullptr : tuningPreset(name));
 }
 
+void Pipeline::setTemperament(const std::string& name) {
+    noteMapper_.setTemperament(name);
+}
+
 void Pipeline::setPostProcessorConfig(PostProcessor::Config cfg) {
     postProcessor_.setConfig(cfg);
 }

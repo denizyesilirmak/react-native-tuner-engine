@@ -4,6 +4,7 @@ import type {
   EngineStatus,
   Instrument,
   PitchEvent,
+  QualityPreset,
   Temperament,
   TunerConfig,
   TuningPreset,
@@ -12,9 +13,33 @@ import type {
 type PitchCallback = (event: PitchEvent) => void;
 type Unsubscribe = () => void;
 
+const QUALITY_PRESETS: Record<QualityPreset, { frameSize: number; overlapRatio: number }> = {
+  'low-latency': { frameSize: 1024, overlapRatio: 0 },
+  'balanced': { frameSize: 2048, overlapRatio: 0.5 },
+  'high-accuracy': { frameSize: 4096, overlapRatio: 0.75 },
+};
+
 class TunerEngine {
   configure(opts: TunerConfig): Promise<void> {
-    return NativeTunerEngine.configure(opts);
+    const { quality, adaptiveFrameSize, ...rest } = opts;
+    const resolved = { ...rest };
+
+    // quality preset overrides frameSize and overlapRatio
+    if (quality && QUALITY_PRESETS[quality]) {
+      const preset = QUALITY_PRESETS[quality];
+      resolved.frameSize = preset.frameSize;
+      resolved.overlapRatio = preset.overlapRatio;
+    }
+
+    // If user explicitly provided frameSize or quality, disable adaptive frame sizing
+    // so setInstrument won't override the chosen frame size.
+    if (resolved.frameSize !== undefined || quality !== undefined) {
+      (resolved as any).adaptiveFrameSize = false;
+    } else {
+      (resolved as any).adaptiveFrameSize = adaptiveFrameSize !== false;
+    }
+
+    return NativeTunerEngine.configure(resolved);
   }
 
   start(): Promise<void> {
