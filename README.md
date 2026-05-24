@@ -1,5 +1,10 @@
 # react-native-tuner-engine
 
+[![npm version](https://img.shields.io/npm/v/react-native-tuner-engine)](https://www.npmjs.com/package/react-native-tuner-engine)
+[![npm downloads](https://img.shields.io/npm/dm/react-native-tuner-engine)](https://www.npmjs.com/package/react-native-tuner-engine)
+[![license](https://img.shields.io/npm/l/react-native-tuner-engine)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey)]()
+
 A React Native Turbo Module for real-time instrument pitch detection. The detection pipeline runs entirely in C++ on a dedicated audio thread and delivers per-frame results to JavaScript via the New Architecture event system.
 
 Requires React Native **0.75 or later** with the New Architecture enabled.
