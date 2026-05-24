@@ -43,8 +43,19 @@
   },
   "keywords": [
     "react-native",
+    "turbo-module",
+    "new-architecture",
+    "pitch-detection",
+    "tuner",
+    "audio",
+    "dsp",
+    "cpp",
+    "jsi",
     "ios",
-    "android"
+    "android",
+    "oboe",
+    "yin",
+    "music"
   ],
   "repository": {
     "type": "git",
