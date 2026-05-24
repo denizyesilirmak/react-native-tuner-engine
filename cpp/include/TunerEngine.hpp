@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pipeline.hpp"
+#include "OnsetDetector.hpp"
 #include "PostProcessor.hpp"
 #include "PitchResult.hpp"
 
@@ -23,6 +24,8 @@ public:
     void setTuning(const std::string& name);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    void setOnsetDetectionEnabled(bool enabled);
+    void setOnsetConfig(OnsetDetector::Config cfg);
 
 private:
     std::unique_ptr<Pipeline> pipeline_;

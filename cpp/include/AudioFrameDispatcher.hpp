@@ -45,6 +45,8 @@ public:
     void setTuning(const std::string& name);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    void setOnsetDetectionEnabled(bool enabled);
+    void setOnsetConfig(OnsetDetector::Config cfg);
 
 private:
     void workerLoop();

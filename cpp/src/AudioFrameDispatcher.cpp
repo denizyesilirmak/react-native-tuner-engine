@@ -79,6 +79,16 @@ void AudioFrameDispatcher::setHpfCutoff(float hz) {
     if (engine_) engine_->setHpfCutoff(hz);
 }
 
+void AudioFrameDispatcher::setOnsetDetectionEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    if (engine_) engine_->setOnsetDetectionEnabled(enabled);
+}
+
+void AudioFrameDispatcher::setOnsetConfig(OnsetDetector::Config cfg) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    if (engine_) engine_->setOnsetConfig(cfg);
+}
+
 void AudioFrameDispatcher::workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
         if (ring_.available() >= frameSize_) {

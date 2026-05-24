@@ -1,4 +1,5 @@
 #include "NoteMapper.hpp"
+#include "OnsetDetector.hpp"
 #include "TunerEngine.hpp"
 #include "YinPitchDetector.hpp"
 #include "PyinPitchDetector.hpp"
@@ -361,6 +362,46 @@ static void testEnsembleOctaveSafety() {
     assert(result.octave == 3);
 }
 
+static void testOnsetDetector() {
+    OnsetDetector::Config cfg;
+    cfg.thresholdDb = 6.0f;
+    cfg.envelopeAlpha = 0.15f;
+    cfg.cooldownFrames = 4;
+
+    OnsetDetector det(cfg);
+
+    // When disabled, never fires
+    assert(!det.detect(-30.0f));
+    assert(!det.detect(0.0f)); // 30dB jump — still no onset because disabled
+
+    // Enable
+    det.setEnabled(true);
+    det.reset();
+
+    // Feed quiet frames to establish envelope
+    for (int i = 0; i < 10; ++i) {
+        det.detect(-40.0f);
+    }
+
+    // Sudden jump — should trigger onset
+    bool onset = det.detect(-20.0f); // +20dB rise >> 6dB threshold
+    std::cout << "onset on energy spike: " << onset << "\n";
+    assert(onset);
+
+    // Cooldown — should NOT fire even with another jump
+    bool duringCooldown = det.detect(-10.0f);
+    std::cout << "onset during cooldown: " << duringCooldown << "\n";
+    assert(!duringCooldown);
+
+    // After cooldown expires, can fire again
+    for (int i = 0; i < 4; ++i) {
+        det.detect(-40.0f);
+    }
+    bool afterCooldown = det.detect(-20.0f);
+    std::cout << "onset after cooldown: " << afterCooldown << "\n";
+    assert(afterCooldown);
+}
+
 int main() {
     testNoteMapper();
 
@@ -400,6 +441,7 @@ int main() {
     testPipelineNoisySignal();
     testPipelineHysteresis();
     testInstrumentPreset();
+    testOnsetDetector();
 
     std::cout << "all tuner engine tests passed." << std::endl;
 

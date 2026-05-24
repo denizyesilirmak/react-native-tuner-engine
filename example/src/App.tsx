@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useTuner } from 'react-native-tuner-engine';
 import type { Instrument } from 'react-native-tuner-engine';
 import { TunerView } from './components/TunerView';
@@ -19,6 +19,7 @@ export default function App() {
   const [minFrequency, setMinFrequency] = useState(60);
   const [maxFrequency, setMaxFrequency] = useState(1200);
   const [a4, setA4] = useState(440);
+  const [onsetDetection, setOnsetDetection] = useState(true);
 
   const { start, stop, latest, isRunning, error } = useTuner({
     noiseGateDb,
@@ -30,59 +31,65 @@ export default function App() {
     minFrequency,
     maxFrequency,
     a4,
+    onsetDetection,
   });
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Tab Bar */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity
-          style={[styles.tabBtn, tab === 'tuner' && styles.tabBtnActive]}
-          onPress={() => setTab('tuner')}
-        >
-          <Text style={[styles.tabText, tab === 'tuner' && styles.tabTextActive]}>Tuner</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabBtn, tab === 'settings' && styles.tabBtnActive]}
-          onPress={() => setTab('settings')}
-        >
-          <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>
-            Settings
-          </Text>
-        </TouchableOpacity>
-      </View>
+    <SafeAreaProvider>
 
-      {tab === 'tuner' ? (
-        <TunerView
-          latest={latest}
-          isRunning={isRunning}
-          error={error}
-          onStart={start}
-          onStop={stop}
-        />
-      ) : (
-        <SettingsView
-          instrument={instrument}
-          a4={a4}
-          noiseGateDb={noiseGateDb}
-          confidenceThreshold={confidenceThreshold}
-          emaAlpha={emaAlpha}
-          hysteresisFrames={hysteresisFrames}
-          hpfCutoffHz={hpfCutoffHz}
-          minFrequency={minFrequency}
-          maxFrequency={maxFrequency}
-          onInstrumentChange={setInstrument}
-          onA4Change={setA4}
-          onNoiseGateDbChange={setNoiseGateDb}
-          onConfidenceThresholdChange={setConfidenceThreshold}
-          onEmaAlphaChange={setEmaAlpha}
-          onHysteresisFramesChange={setHysteresisFrames}
-          onHpfCutoffHzChange={setHpfCutoffHz}
-          onMinFrequencyChange={setMinFrequency}
-          onMaxFrequencyChange={setMaxFrequency}
-        />
-      )}
-    </SafeAreaView>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        {/* Tab Bar */}
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            style={[styles.tabBtn, tab === 'tuner' && styles.tabBtnActive]}
+            onPress={() => setTab('tuner')}
+          >
+            <Text style={[styles.tabText, tab === 'tuner' && styles.tabTextActive]}>Tuner</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, tab === 'settings' && styles.tabBtnActive]}
+            onPress={() => setTab('settings')}
+          >
+            <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>
+              Settings
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {tab === 'tuner' ? (
+          <TunerView
+            latest={latest}
+            isRunning={isRunning}
+            error={error}
+            onStart={start}
+            onStop={stop}
+          />
+        ) : (
+          <SettingsView
+            instrument={instrument}
+            a4={a4}
+            noiseGateDb={noiseGateDb}
+            confidenceThreshold={confidenceThreshold}
+            emaAlpha={emaAlpha}
+            hysteresisFrames={hysteresisFrames}
+            hpfCutoffHz={hpfCutoffHz}
+            minFrequency={minFrequency}
+            maxFrequency={maxFrequency}
+            onsetDetection={onsetDetection}
+            onInstrumentChange={setInstrument}
+            onA4Change={setA4}
+            onNoiseGateDbChange={setNoiseGateDb}
+            onConfidenceThresholdChange={setConfidenceThreshold}
+            onEmaAlphaChange={setEmaAlpha}
+            onHysteresisFramesChange={setHysteresisFrames}
+            onHpfCutoffHzChange={setHpfCutoffHz}
+            onMinFrequencyChange={setMinFrequency}
+            onMaxFrequencyChange={setMaxFrequency}
+            onOnsetDetectionChange={setOnsetDetection}
+          />
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 

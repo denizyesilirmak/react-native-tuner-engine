@@ -27,6 +27,11 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
         return silent;
     }
 
+    // --- Onset detection (no-op when disabled — single branch) ---
+    if (onsetDetector_.detect(rmsDb)) {
+        postProcessor_.reset();
+    }
+
     // --- Working copy: HPF only.
     // Hann windowing is reserved for FFT-based detectors (M3 cepstrum/PYIN).
     // YIN works in the time domain — windowing distorts its difference function.
@@ -104,6 +109,15 @@ void Pipeline::setPostProcessorConfig(PostProcessor::Config cfg) {
 
 void Pipeline::setHpfCutoff(float hz) {
     hpf_ = BiquadHpf(sampleRate_, hz);
+}
+
+void Pipeline::setOnsetDetectionEnabled(bool enabled) {
+    onsetDetector_.setEnabled(enabled);
+    if (!enabled) onsetDetector_.reset();
+}
+
+void Pipeline::setOnsetConfig(OnsetDetector::Config cfg) {
+    onsetDetector_.setConfig(cfg);
 }
 
 float Pipeline::calculateRmsDb(const float* input, int n) const {

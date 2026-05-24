@@ -4,6 +4,7 @@
 #include "IPitchDetector.hpp"
 #include "InstrumentPresets.hpp"
 #include "NoteMapper.hpp"
+#include "OnsetDetector.hpp"
 #include "PitchResult.hpp"
 #include "PostProcessor.hpp"
 #include "SnrEstimator.hpp"
@@ -28,6 +29,8 @@ public:
     void setTuning(const std::string& name);   // e.g. "guitar_standard", "" to disable
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    void setOnsetDetectionEnabled(bool enabled);
+    void setOnsetConfig(OnsetDetector::Config cfg);
 
 private:
     int frameSize_;
@@ -40,6 +43,7 @@ private:
     HannWindow window_;
     std::unique_ptr<IPitchDetector> detector_;
     SnrEstimator snr_;
+    OnsetDetector onsetDetector_;
     PostProcessor postProcessor_;
     NoteMapper noteMapper_;
     StringMatcher stringMatcher_;
