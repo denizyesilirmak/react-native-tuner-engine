@@ -11,6 +11,14 @@ export type Instrument =
 
 export type Temperament = 'equal' | 'just';
 
+/**
+ * Quality preset that maps to a frame size + overlap combination.
+ * - low-latency: frameSize=1024, overlap=0 — fastest response, less accuracy on low notes
+ * - balanced: frameSize=2048, overlap=0.5 — good for most instruments
+ * - high-accuracy: frameSize=4096, overlap=0.75 — best for bass/cello, ~21ms update rate
+ */
+export type QualityPreset = 'low-latency' | 'balanced' | 'high-accuracy';
+
 export type TunerConfig = {
   /** Audio sample rate in Hz. Default: 48000 */
   sampleRate?: number;
@@ -47,6 +55,27 @@ export type TunerConfig = {
    * Default: false
    */
   onsetDetection?: boolean;
+  /**
+   * Fraction of the frame that overlaps with the previous frame (0.0–0.75).
+   * Higher overlap gives more frequent pitch updates at the cost of CPU.
+   * - 0.0: no overlap (default, backward-compatible)
+   * - 0.5: 50% overlap (2x update rate)
+   * - 0.75: 75% overlap (4x update rate)
+   * Default: 0
+   */
+  overlapRatio?: number;
+  /**
+   * When true, frame size is automatically selected based on the configured instrument.
+   * Bass and cello use 4096 for better low-frequency resolution; others use 2048.
+   * Overridden if frameSize is explicitly provided.
+   * Default: true
+   */
+  adaptiveFrameSize?: boolean;
+  /**
+   * Quality preset that configures frameSize and overlapRatio together.
+   * Overrides individual frameSize/overlapRatio if provided.
+   */
+  quality?: QualityPreset;
 };
 
 export type TuningPreset =

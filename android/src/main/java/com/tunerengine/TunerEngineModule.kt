@@ -25,8 +25,9 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     val minFrequency = opts?.getDouble("minFrequency")?.toFloat() ?: 60.0f
     val maxFrequency = opts?.getDouble("maxFrequency")?.toFloat() ?: 1200.0f
     val a4 = opts?.getDouble("a4")?.toFloat() ?: 440.0f
+    val overlapRatio = opts?.getDouble("overlapRatio")?.toFloat() ?: 0.0f
 
-    nativeConfigure(sampleRate, frameSize, noiseGateDb, confidenceThreshold, minFrequency, maxFrequency, a4)
+    nativeConfigure(sampleRate, frameSize, noiseGateDb, confidenceThreshold, minFrequency, maxFrequency, a4, overlapRatio)
 
     val hpfCutoffHz = opts?.getDouble("hpfCutoffHz")?.toFloat()
     if (hpfCutoffHz != null) nativeSetHpfCutoff(hpfCutoffHz)
@@ -153,14 +154,14 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   }
 
   // JNI methods
-  private external fun nativeInit(sampleRate: Float, frameSize: Int)
+  private external fun nativeInit(sampleRate: Float, frameSize: Int, overlapRatio: Float)
   private external fun nativeStart(): Boolean
   private external fun nativeStop()
   private external fun nativeConfigure(
     sampleRate: Float, frameSize: Int,
     noiseGateDb: Float, confidenceThreshold: Float,
     minFrequency: Float, maxFrequency: Float,
-    a4: Float
+    a4: Float, overlapRatio: Float
   )
   private external fun nativeSetA4(hz: Float)
   private external fun nativeSetInstrument(name: String)

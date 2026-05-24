@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useTuner } from 'react-native-tuner-engine';
-import type { Instrument } from 'react-native-tuner-engine';
+import type { Instrument, QualityPreset } from 'react-native-tuner-engine';
 import { TunerView } from './components/TunerView';
 import { SettingsView } from './components/SettingsView';
 
@@ -20,6 +20,8 @@ export default function App() {
   const [maxFrequency, setMaxFrequency] = useState(1200);
   const [a4, setA4] = useState(440);
   const [onsetDetection, setOnsetDetection] = useState(true);
+  const [quality, setQuality] = useState<QualityPreset | undefined>(undefined);
+  const [overlapRatio, setOverlapRatio] = useState(0);
 
   const { start, stop, latest, isRunning, error } = useTuner({
     noiseGateDb,
@@ -32,6 +34,8 @@ export default function App() {
     maxFrequency,
     a4,
     onsetDetection,
+    quality,
+    overlapRatio,
   });
 
   return (
@@ -86,6 +90,10 @@ export default function App() {
             onMinFrequencyChange={setMinFrequency}
             onMaxFrequencyChange={setMaxFrequency}
             onOnsetDetectionChange={setOnsetDetection}
+            quality={quality}
+            overlapRatio={overlapRatio}
+            onQualityChange={setQuality}
+            onOverlapRatioChange={setOverlapRatio}
           />
         )}
       </SafeAreaView>

@@ -6,10 +6,14 @@
 #include "CepstrumPitchDetector.hpp"
 #include "EnsembleSelector.hpp"
 #include "BiquadHpf.hpp"
+#include "AudioFrameDispatcher.hpp"
+#include "InstrumentPresets.hpp"
 
 #include <cassert>
 #include <cmath>
+#include <chrono>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 static constexpr float PI = 3.14159265358979323846f;
@@ -402,6 +406,169 @@ static void testOnsetDetector() {
     assert(afterCooldown);
 }
 
+// --- M8: Adaptive Frame Size & Overlap tests ---
+
+static void testSlidingWindowOverlap() {
+    // With 75% overlap on a 2048 frame, hopSize should be 512.
+    // Feed a continuous 440 Hz sine and verify we get results at hop rate.
+    constexpr float sr = 48000.0f;
+    constexpr int frameSize = 2048;
+    constexpr float overlap = 0.75f;
+
+    int callbackCount = 0;
+    PitchResult lastResult;
+
+    AudioFrameDispatcher dispatcher(frameSize, sr,
+        [&](const PitchResult& r) {
+            callbackCount++;
+            lastResult = r;
+        },
+        overlap
+    );
+
+    assert(dispatcher.hopSize() == 512);  // 2048 * (1 - 0.75) = 512
+    assert(dispatcher.frameSize() == 2048);
+
+    // Generate enough audio to fill multiple hops
+    // First frame needs 2048, then each subsequent needs 512
+    constexpr int totalSamples = 2048 + 512 * 7; // 1 first + 7 hops = 8 callbacks
+    auto signal = generateSine(440.0f, sr, totalSamples);
+
+    dispatcher.start();
+    dispatcher.push(signal.data(), totalSamples);
+
+    // Wait for processing
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    dispatcher.stop();
+
+    std::cout << "sliding window overlap 75%: callbacks=" << callbackCount
+              << " lastFreq=" << lastResult.frequency << "\n";
+
+    // Should have received multiple callbacks (first frame + hops)
+    assert(callbackCount >= 4); // at least some overlap callbacks fired
+}
+
+static void testSlidingWindowNoOverlap() {
+    // With 0% overlap, behavior should be identical to the old implementation
+    constexpr float sr = 48000.0f;
+    constexpr int frameSize = 2048;
+
+    int callbackCount = 0;
+
+    AudioFrameDispatcher dispatcher(frameSize, sr,
+        [&](const PitchResult& r) {
+            callbackCount++;
+        },
+        0.0f
+    );
+
+    assert(dispatcher.hopSize() == 2048); // no overlap → hop = frame
+
+    auto signal = generateSine(440.0f, sr, 2048 * 4);
+
+    dispatcher.start();
+    dispatcher.push(signal.data(), 2048 * 4);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    dispatcher.stop();
+
+    std::cout << "sliding window no overlap: callbacks=" << callbackCount << "\n";
+    assert(callbackCount == 4); // exactly 4 full frames
+}
+
+static void testAdaptiveFrameSizeBass() {
+    // Bass instrument should use 4096 frame for E1 (41 Hz) detection
+    constexpr float sr = 48000.0f;
+    constexpr int frameSize = 4096;
+    constexpr float e1Freq = 41.2f;
+
+    auto signal = generateSine(e1Freq, sr, frameSize * 8);
+
+    TunerEngine engine(sr, frameSize);
+    engine.setInstrument("bass");
+
+    PitchResult result;
+    for (int f = 0; f < 8; ++f) {
+        result = engine.process(signal.data() + f * frameSize, frameSize);
+    }
+
+    std::cout << "adaptive bass E1 (41.2 Hz): hasPitch=" << result.hasPitch
+              << " freq=" << result.frequency
+              << " note=" << result.noteName << result.octave
+              << " conf=" << result.confidence << "\n";
+
+    assert(result.hasPitch);
+    assertNear(result.frequency, e1Freq, e1Freq * 0.02f); // within 2%
+}
+
+static void testInstrumentRecommendedFrameSize() {
+    assert(instrumentRecommendedFrameSize("bass") == 4096);
+    assert(instrumentRecommendedFrameSize("cello") == 4096);
+    assert(instrumentRecommendedFrameSize("guitar") == 2048);
+    assert(instrumentRecommendedFrameSize("ukulele") == 2048);
+    assert(instrumentRecommendedFrameSize("violin") == 2048);
+    assert(instrumentRecommendedFrameSize("chromatic") == 2048);
+    assert(instrumentRecommendedFrameSize("unknown") == 2048);
+    std::cout << "instrumentRecommendedFrameSize: all correct\n";
+}
+
+static void testDispatcherReconfigure() {
+    constexpr float sr = 48000.0f;
+    int callbackCount = 0;
+
+    AudioFrameDispatcher dispatcher(2048, sr,
+        [&](const PitchResult& r) {
+            callbackCount++;
+        },
+        0.0f
+    );
+
+    assert(dispatcher.frameSize() == 2048);
+
+    // Reconfigure to 4096
+    dispatcher.reconfigure(4096, sr);
+    assert(dispatcher.frameSize() == 4096);
+    assert(dispatcher.hopSize() == 4096); // overlap still 0
+
+    // Push audio and verify it processes with new frame size
+    auto signal = generateSine(82.41f, sr, 4096 * 2);
+    dispatcher.start();
+    dispatcher.push(signal.data(), 4096 * 2);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    dispatcher.stop();
+
+    std::cout << "dispatcher reconfigure 2048→4096: callbacks=" << callbackCount << "\n";
+    assert(callbackCount == 2);
+}
+
+static void testSetOverlapRatio() {
+    constexpr float sr = 48000.0f;
+
+    AudioFrameDispatcher dispatcher(2048, sr,
+        [](const PitchResult&) {},
+        0.0f
+    );
+
+    assert(dispatcher.hopSize() == 2048);
+
+    dispatcher.setOverlapRatio(0.5f);
+    assert(dispatcher.hopSize() == 1024);
+
+    dispatcher.setOverlapRatio(0.75f);
+    assert(dispatcher.hopSize() == 512);
+
+    // Clamp to max 0.75
+    dispatcher.setOverlapRatio(0.9f);
+    assert(dispatcher.hopSize() == 512); // clamped to 0.75
+
+    // Clamp to min 0.0
+    dispatcher.setOverlapRatio(-0.5f);
+    assert(dispatcher.hopSize() == 2048); // clamped to 0.0
+
+    std::cout << "setOverlapRatio: all correct\n";
+}
+
 int main() {
     testNoteMapper();
 
@@ -442,6 +609,14 @@ int main() {
     testPipelineHysteresis();
     testInstrumentPreset();
     testOnsetDetector();
+
+    // M8 Adaptive Frame Size & Overlap tests
+    testInstrumentRecommendedFrameSize();
+    testSetOverlapRatio();
+    testSlidingWindowNoOverlap();
+    testSlidingWindowOverlap();
+    testDispatcherReconfigure();
+    testAdaptiveFrameSizeBass();
 
     std::cout << "all tuner engine tests passed." << std::endl;
 
