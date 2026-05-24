@@ -41,6 +41,12 @@ export type TunerConfig = {
    * Lower for bass guitar (e.g. 30), higher for violin (e.g. 100). Default: 70
    */
   hpfCutoffHz?: number;
+  /**
+   * Enable onset detection. When enabled, the PostProcessor resets on note
+   * attacks for faster response. Minimal CPU cost (one comparison per frame).
+   * Default: false
+   */
+  onsetDetection?: boolean;
 };
 
 export type TuningPreset =

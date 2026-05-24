@@ -134,6 +134,7 @@ type TunerConfig = {
   emaAlpha?: number;            // default 0.35 — PostProcessor smoothing (0.05–1.0)
   hysteresisFrames?: number;    // default 3    — frames to confirm a note change (1–10)
   hpfCutoffHz?: number;         // default 70   — high-pass filter cutoff in Hz (20–300)
+  onsetDetection?: boolean;     // default false — resets smoothing on note attacks
 };
 
 type Instrument =

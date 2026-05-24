@@ -61,6 +61,9 @@
     if (opts[@"hysteresisFrames"])  cfg.hysteresisFrames = [opts[@"hysteresisFrames"] intValue];
     _dispatcher->setPostProcessorConfig(cfg);
   }
+  if (opts[@"onsetDetection"]) {
+    _dispatcher->setOnsetDetectionEnabled([opts[@"onsetDetection"] boolValue]);
+  }
 }
 
 - (void)startWithCompletion:(void(^)(NSError* _Nullable error))completion {

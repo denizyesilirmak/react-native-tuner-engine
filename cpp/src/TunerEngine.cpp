@@ -57,3 +57,11 @@ void TunerEngine::setPostProcessorConfig(PostProcessor::Config cfg) {
 void TunerEngine::setHpfCutoff(float hz) {
     pipeline_->setHpfCutoff(hz);
 }
+
+void TunerEngine::setOnsetDetectionEnabled(bool enabled) {
+    pipeline_->setOnsetDetectionEnabled(enabled);
+}
+
+void TunerEngine::setOnsetConfig(OnsetDetector::Config cfg) {
+    pipeline_->setOnsetConfig(cfg);
+}
