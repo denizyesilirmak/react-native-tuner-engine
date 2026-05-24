@@ -21,11 +21,12 @@
 - (void)configure:(NSDictionary *)opts {
   float sampleRate = opts[@"sampleRate"] ? [opts[@"sampleRate"] floatValue] : 48000.0f;
   int frameSize    = opts[@"frameSize"]  ? [opts[@"frameSize"] intValue]   : 2048;
+  float overlapRatio = opts[@"overlapRatio"] ? [opts[@"overlapRatio"] floatValue] : 0.0f;
 
-  [self buildDispatcherWithSampleRate:sampleRate frameSize:frameSize opts:opts];
+  [self buildDispatcherWithSampleRate:sampleRate frameSize:frameSize overlapRatio:overlapRatio opts:opts];
 }
 
-- (void)buildDispatcherWithSampleRate:(float)sr frameSize:(int)fs opts:(NSDictionary*)opts {
+- (void)buildDispatcherWithSampleRate:(float)sr frameSize:(int)fs overlapRatio:(float)overlap opts:(NSDictionary*)opts {
   __weak __typeof__(self) weakSelf = self;
 
   _dispatcher = std::make_unique<AudioFrameDispatcher>(fs, sr,
@@ -45,7 +46,8 @@
         @"stringDeviation":  @(r.stringDeviation)
       };
       strongSelf.onPitch(event);
-    }
+    },
+    overlap
   );
 
   if (opts[@"noiseGateDb"])       _dispatcher->setNoiseGateDb([opts[@"noiseGateDb"] floatValue]);
@@ -76,7 +78,7 @@
 
   // Spin up dispatcher if not yet configured
   if (!_dispatcher) {
-    [self buildDispatcherWithSampleRate:48000.0f frameSize:2048 opts:@{}];
+    [self buildDispatcherWithSampleRate:48000.0f frameSize:2048 overlapRatio:0.0f opts:@{}];
   }
 
   __weak __typeof__(self) weakSelf = self;

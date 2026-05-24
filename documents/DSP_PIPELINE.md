@@ -75,6 +75,34 @@ Oboe kütüphanesi kullanılır. `PerformanceMode::LowLatency` istenir; cihaz de
 
 Bu ayrım sayesinde ne audio thread bloklanır ne de JS thread gecikir.
 
+### Sliding Window ve Overlap
+
+Worker thread varsayılanda her `frameSize` örnekten bir sonuç üretir (overlap = 0). Ama `overlapRatio` ayarlandığında **sliding window** mantığına geçer:
+
+```
+overlapRatio = 0.75, frameSize = 2048 → hopSize = 512
+
+İlk frame:  ring'den 2048 örnek okunur (cold start)
+Sonraki:    frameBuffer ← [eski 1536 örnek | yeni 512 örnek]
+            memmove ile eski veriler sola kayar, hop kadar yeni veri eklenir
+```
+
+Bu sayede her hop'ta (512 örnek ≈ 10.7 ms) yeni bir pitch sonucu üretilir — 4x daha sık güncelleme, ama aynı 2048 örneklik analiz penceresi.
+
+**Adaptive Frame Size**: Enstrüman preset'ine göre frame boyutu otomatik değişir:
+
+| Enstrüman | Frame Size | Min Tespit (@ 48 kHz) | Neden |
+|-----------|-----------|----------------------|-------|
+| Bass, Cello | 4096 | 23.4 Hz | E1 (41 Hz) için YIN lag ≥ 2048 gerekli |
+| Diğerleri | 2048 | 46.9 Hz | Yeterli çözünürlük, düşük gecikme |
+
+`setInstrument("bass")` çağrıldığında dispatcher otomatik olarak `reconfigure(4096, sampleRate)` yapar — worker thread durur, buffer'lar yeniden boyutlanır, TunerEngine yeniden oluşturulur, thread tekrar başlar.
+
+**Gecikme bütçesi (4096, %75 overlap):**
+- Hop süresi: 1024/48000 = 21.3 ms
+- Full pipeline: ~3 ms (M1'de ölçülmüş)
+- CPU kullanımı: %14.1 (tek çekirdek)
+
 ---
 
 ## 3. Pipeline — Sıralı İşlem Aşamaları

@@ -153,6 +153,8 @@ TunerEngine.setTemperament(name: Temperament): void
 TunerEngine.getStatus(): { isRunning: boolean; engineReady: boolean }
 ```
 
+For the full API reference (all config options, quality presets, adaptive frame size, overlap ratio), see **[documents/API.md](documents/API.md)**.
+
 ## C++ pipeline
 
 The shared C++ core (`cpp/`) compiles as a static library on both platforms.
