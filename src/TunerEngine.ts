@@ -1,4 +1,4 @@
-import { DeviceEventEmitter } from 'react-native';
+import { Platform, DeviceEventEmitter } from 'react-native';
 import NativeTunerEngine from './NativeTunerEngine';
 import type {
   EngineStatus,
@@ -50,6 +50,43 @@ class TunerEngine {
   }
 
   onPitch(callback: PitchCallback): Unsubscribe {
+    if (Platform.OS === 'android') {
+      // Bridgeless mode on Android doesn't deliver RCTDeviceEventEmitter events.
+      // Poll getStatus() which includes latest pitch via requestAnimationFrame.
+      let lastSeq = -1;
+      let rafId: number;
+      let stopped = false;
+
+      const poll = () => {
+        if (stopped) return;
+        try {
+          const s = NativeTunerEngine.getStatus() as any;
+          if (s.seq !== lastSeq) {
+            lastSeq = s.seq;
+            callback({
+              hasPitch: s.hasPitch,
+              frequency: s.frequency,
+              confidence: s.confidence,
+              rmsDb: s.rmsDb,
+              noteName: s.noteName,
+              octave: s.octave,
+              cents: s.cents,
+              nearestString: s.nearestString,
+              stringDeviation: s.stringDeviation,
+            } as PitchEvent);
+          }
+        } catch (_) {}
+        rafId = requestAnimationFrame(poll);
+      };
+      rafId = requestAnimationFrame(poll);
+
+      return () => {
+        stopped = true;
+        cancelAnimationFrame(rafId);
+      };
+    }
+
+    // iOS: JSI direct callback via global + DeviceEventEmitter fallback
     (globalThis as any).__tunerEngineOnPitch = callback;
     const sub = DeviceEventEmitter.addListener('onPitch', callback);
     return () => {

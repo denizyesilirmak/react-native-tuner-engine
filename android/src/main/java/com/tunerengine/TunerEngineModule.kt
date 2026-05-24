@@ -3,13 +3,11 @@ package com.tunerengine
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
-import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.WritableNativeMap
-import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
 
@@ -18,41 +16,64 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
 
   private var isRunning = false
 
+  // Latest pitch data written by the C++ worker thread, read by JS via getStatus()
+  @Volatile private var latestHasPitch = false
+  @Volatile private var latestFrequency = 0f
+  @Volatile private var latestConfidence = 0f
+  @Volatile private var latestRmsDb = 0f
+  @Volatile private var latestNoteName = ""
+  @Volatile private var latestOctave = 0
+  @Volatile private var latestCents = 0f
+  @Volatile private var latestNearestString = ""
+  @Volatile private var latestStringDeviation = 0f
+  @Volatile private var pitchSequence = 0L  // monotonic counter for change detection
+
   override fun configure(opts: ReadableMap?, promise: Promise) {
-    val sampleRate = opts?.getDouble("sampleRate")?.toFloat() ?: 48000.0f
-    val frameSize = if (opts?.hasKey("frameSize") == true) opts.getInt("frameSize") else 2048
-    val noiseGateDb = opts?.getDouble("noiseGateDb")?.toFloat() ?: -55.0f
-    val confidenceThreshold = opts?.getDouble("confidenceThreshold")?.toFloat() ?: 0.75f
-    val minFrequency = opts?.getDouble("minFrequency")?.toFloat() ?: 60.0f
-    val maxFrequency = opts?.getDouble("maxFrequency")?.toFloat() ?: 1200.0f
-    val a4 = opts?.getDouble("a4")?.toFloat() ?: 440.0f
-    val overlapRatio = opts?.getDouble("overlapRatio")?.toFloat() ?: 0.0f
+    try {
+      val sampleRate = if (opts?.hasKey("sampleRate") == true) opts.getDouble("sampleRate").toFloat() else 48000.0f
+      val frameSize = if (opts?.hasKey("frameSize") == true) opts.getInt("frameSize") else 2048
+      val noiseGateDb = if (opts?.hasKey("noiseGateDb") == true) opts.getDouble("noiseGateDb").toFloat() else -55.0f
+      val confidenceThreshold = if (opts?.hasKey("confidenceThreshold") == true) opts.getDouble("confidenceThreshold").toFloat() else 0.75f
+      val minFrequency = if (opts?.hasKey("minFrequency") == true) opts.getDouble("minFrequency").toFloat() else 60.0f
+      val maxFrequency = if (opts?.hasKey("maxFrequency") == true) opts.getDouble("maxFrequency").toFloat() else 1200.0f
+      val a4 = if (opts?.hasKey("a4") == true) opts.getDouble("a4").toFloat() else 440.0f
+      val overlapRatio = if (opts?.hasKey("overlapRatio") == true) opts.getDouble("overlapRatio").toFloat() else 0.0f
 
-    nativeConfigure(sampleRate, frameSize, noiseGateDb, confidenceThreshold, minFrequency, maxFrequency, a4, overlapRatio)
+      nativeConfigure(sampleRate, frameSize, noiseGateDb, confidenceThreshold, minFrequency, maxFrequency, a4, overlapRatio)
 
-    val hpfCutoffHz = opts?.getDouble("hpfCutoffHz")?.toFloat()
-    if (hpfCutoffHz != null) nativeSetHpfCutoff(hpfCutoffHz)
+      if (opts?.hasKey("hpfCutoffHz") == true) {
+        nativeSetHpfCutoff(opts.getDouble("hpfCutoffHz").toFloat())
+      }
 
-    val emaAlpha = opts?.getDouble("emaAlpha")?.toFloat()
-    val hysteresisFrames = if (opts?.hasKey("hysteresisFrames") == true) opts.getInt("hysteresisFrames") else null
-    if (emaAlpha != null || hysteresisFrames != null) {
-      nativeSetPostProcessorConfig(emaAlpha ?: 0.35f, hysteresisFrames ?: 3)
+      val hasEma = opts?.hasKey("emaAlpha") == true
+      val hasHyst = opts?.hasKey("hysteresisFrames") == true
+      if (hasEma || hasHyst) {
+        val emaAlpha = if (hasEma) opts!!.getDouble("emaAlpha").toFloat() else 0.35f
+        val hysteresisFrames = if (hasHyst) opts!!.getInt("hysteresisFrames") else 3
+        nativeSetPostProcessorConfig(emaAlpha, hysteresisFrames)
+      }
+
+      if (opts?.hasKey("onsetDetection") == true) {
+        nativeSetOnsetDetection(opts.getBoolean("onsetDetection"))
+      }
+
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("CONFIGURE_ERROR", "configure failed: ${e.message}", e)
     }
-
-    if (opts?.hasKey("onsetDetection") == true) {
-      nativeSetOnsetDetection(opts.getBoolean("onsetDetection"))
-    }
-
-    promise.resolve(null)
   }
 
   override fun start(promise: Promise) {
-    val started = nativeStart()
-    if (started) {
-      isRunning = true
-      promise.resolve(null)
-    } else {
-      promise.reject("START_ERROR", "Failed to start audio capture")
+    try {
+      val started = nativeStart()
+      if (started) {
+        isRunning = true
+        promise.resolve(null)
+      } else {
+        promise.reject("START_ERROR", "Failed to start audio capture")
+      }
+    } catch (e: Exception) {
+      promise.reject("START_ERROR", "start failed: ${e.message}", e)
     }
   }
 
@@ -117,6 +138,16 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     val map = WritableNativeMap()
     map.putBoolean("isRunning", isRunning)
     map.putBoolean("engineReady", nativeIsRunning())
+    map.putDouble("seq", pitchSequence.toDouble())
+    map.putBoolean("hasPitch", latestHasPitch)
+    map.putDouble("frequency", latestFrequency.toDouble())
+    map.putDouble("confidence", latestConfidence.toDouble())
+    map.putDouble("rmsDb", latestRmsDb.toDouble())
+    map.putString("noteName", latestNoteName)
+    map.putInt("octave", latestOctave)
+    map.putDouble("cents", latestCents.toDouble())
+    map.putString("nearestString", latestNearestString)
+    map.putDouble("stringDeviation", latestStringDeviation.toDouble())
     return map
   }
 
@@ -137,21 +168,16 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     nearestString: String,
     stringDeviation: Float
   ) {
-    val params = Arguments.createMap().apply {
-      putBoolean("hasPitch", hasPitch)
-      putDouble("frequency", frequency.toDouble())
-      putDouble("confidence", confidence.toDouble())
-      putDouble("rmsDb", rmsDb.toDouble())
-      putString("noteName", noteName)
-      putInt("octave", octave)
-      putDouble("cents", cents.toDouble())
-      putString("nearestString", nearestString)
-      putDouble("stringDeviation", stringDeviation.toDouble())
-    }
-
-    reactApplicationContext
-      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-      .emit("onPitch", params)
+    latestHasPitch = hasPitch
+    latestFrequency = frequency
+    latestConfidence = confidence
+    latestRmsDb = rmsDb
+    latestNoteName = noteName
+    latestOctave = octave
+    latestCents = cents
+    latestNearestString = nearestString
+    latestStringDeviation = stringDeviation
+    pitchSequence++
   }
 
   // JNI methods
