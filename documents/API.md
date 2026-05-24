@@ -250,6 +250,7 @@ type TunerConfig = {
   emaAlpha?: number;             // Default: 0.35. EMA smoothing (0.05–1.0). Lower = smoother.
   hysteresisFrames?: number;     // Default: 3. Frames needed to confirm note change (1–10).
   hpfCutoffHz?: number;          // Default: 70. High-pass filter cutoff in Hz (20–300).
+  onsetDetection?: boolean;      // Default: false. Resets PostProcessor on note attacks for faster response.
 };
 ```
 
@@ -353,6 +354,10 @@ type EngineStatus = {
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
 │  │ Noise Gate (RMS)     │  Below threshold → emit hasPitch=false         │
+│  └──────────┬──────────┘                                                 │
+│             ▼                                                            │
+│  ┌─────────────────────┐                                                 │
+│  │ Onset Detector       │  Energy rise → resets PostProcessor (optional) │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
@@ -469,6 +474,7 @@ useTuner({
 ```typescript
 useTuner({
   instrument: 'chromatic',
+  onsetDetection: true,   // Instant response on attacks
   emaAlpha: 1.0,          // No smoothing
   hysteresisFrames: 1,    // Instant note switching
   confidenceThreshold: 0.6,
@@ -498,6 +504,7 @@ useTuner({
 | `emaAlpha` | Smoother, slower response | Jittery but instant |
 | `hysteresisFrames` | Fast note switching (may bounce) | Stable display (slight delay) |
 | `hpfCutoffHz` | Preserves low fundamentals | Removes more rumble/handling noise |
+| `onsetDetection` | — (disabled) | Resets smoothing on note attacks → faster note switching |
 
 ### Finding the Right `noiseGateDb`
 
