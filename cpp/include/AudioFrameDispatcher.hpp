@@ -48,6 +48,8 @@ public:
     void setFrequencyRange(float minHz, float maxHz);
     void setInstrument(const std::string& name);
     void setTuning(const std::string& name);
+    void setTemperament(const std::string& name);
+    void setAdaptiveFrameSize(bool enabled);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
     void setOnsetDetectionEnabled(bool enabled);
@@ -66,6 +68,7 @@ public:
 private:
     void workerLoop();
     void recomputeHopSize();
+    void applyStoredSettings(); // re-apply cached settings after engine recreation
 
     static constexpr unsigned kRingCapacity = 32768u; // ~680ms at 48kHz — plenty of headroom
 
@@ -73,6 +76,7 @@ private:
     int hopSize_;
     float overlapRatio_;
     float sampleRate_;
+    bool adaptiveFrameSize_{true}; // auto-resize frame on setInstrument
     PitchCallback callback_;
 
     FloatRingBuffer<kRingCapacity> ring_;
@@ -81,6 +85,19 @@ private:
 
     mutable std::mutex engineMutex_; // protects engine_ access across threads
     std::unique_ptr<TunerEngine> engine_;
+
+    // Cached settings — re-applied after engine recreation (setSampleRate / reconfigure)
+    std::string currentInstrument_;
+    std::string currentTuning_;
+    std::string currentTemperament_;
+    float currentA4_{440.0f};
+    float currentNoiseGateDb_{-55.0f};
+    float currentConfidenceThreshold_{0.75f};
+    float currentMinHz_{60.0f};
+    float currentMaxHz_{1200.0f};
+    float currentHpfCutoff_{70.0f};
+    bool currentOnsetEnabled_{false};
+    PostProcessor::Config currentPostCfg_{};
 
     std::thread workerThread_;
     std::atomic<bool> running_{false};

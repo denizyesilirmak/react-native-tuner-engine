@@ -50,6 +50,10 @@ void TunerEngine::setTuning(const std::string& name) {
     pipeline_->setTuning(name);
 }
 
+void TunerEngine::setTemperament(const std::string& name) {
+    pipeline_->setTemperament(name);
+}
+
 void TunerEngine::setPostProcessorConfig(PostProcessor::Config cfg) {
     pipeline_->setPostProcessorConfig(cfg);
 }
