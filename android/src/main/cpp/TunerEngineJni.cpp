@@ -217,4 +217,20 @@ Java_com_tunerengine_TunerEngineModule_nativeSetOnsetDetection(
     if (gDispatcher) gDispatcher->setOnsetDetectionEnabled(static_cast<bool>(enabled));
 }
 
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetTemperament(
+    JNIEnv* env, jobject /*thiz*/, jstring name
+) {
+    const char* nameChars = env->GetStringUTFChars(name, nullptr);
+    if (gDispatcher && nameChars) gDispatcher->setTemperament(std::string(nameChars));
+    env->ReleaseStringUTFChars(name, nameChars);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetAdaptiveFrameSize(
+    JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled
+) {
+    if (gDispatcher) gDispatcher->setAdaptiveFrameSize(static_cast<bool>(enabled));
+}
+
 } // extern "C"

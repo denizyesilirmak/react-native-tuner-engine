@@ -195,10 +195,10 @@ TunerEngine.setTuning('guitar_drop_d');
 
 #### `setTemperament(name: Temperament): void`
 
-Sets the temperament system (currently `'equal'` only; `'just'` planned).
+Sets the temperament system. `'equal'` uses standard 12-TET; `'just'` uses 5-limit just intonation ratios (relative to C).
 
 ```typescript
-TunerEngine.setTemperament('equal');
+TunerEngine.setTemperament('just');
 ```
 
 ---
@@ -337,7 +337,8 @@ type TuningPreset =
 type Temperament = 'equal' | 'just';
 ```
 
-Currently only `'equal'` is implemented. `'just'` intonation is planned for a future release.
+- `'equal'` — Standard 12-tone equal temperament (default).
+- `'just'` — 5-limit just intonation. Target frequencies are shifted by the pure-ratio cent offsets relative to C, so the tuner shows deviation from just intervals rather than equal-tempered ones.
 
 ---
 

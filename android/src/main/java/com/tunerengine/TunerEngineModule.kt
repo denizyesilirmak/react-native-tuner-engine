@@ -57,6 +57,10 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
         nativeSetOnsetDetection(opts.getBoolean("onsetDetection"))
       }
 
+      if (opts?.hasKey("adaptiveFrameSize") == true) {
+        nativeSetAdaptiveFrameSize(opts.getBoolean("adaptiveFrameSize"))
+      }
+
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("CONFIGURE_ERROR", "configure failed: ${e.message}", e)
@@ -96,7 +100,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   }
 
   override fun setTemperament(name: String) {
-    // Temperament support added in M2
+    nativeSetTemperament(name)
   }
 
   override fun requestPermission(promise: Promise) {
@@ -196,6 +200,8 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetHpfCutoff(hz: Float)
   private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
   private external fun nativeSetOnsetDetection(enabled: Boolean)
+  private external fun nativeSetTemperament(name: String)
+  private external fun nativeSetAdaptiveFrameSize(enabled: Boolean)
   private external fun nativeIsRunning(): Boolean
 
   companion object {

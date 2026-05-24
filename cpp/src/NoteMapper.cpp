@@ -14,6 +14,10 @@ void NoteMapper::setA4(float value) {
     a4_ = value;
 }
 
+void NoteMapper::setTemperament(const std::string& name) {
+    useJust_ = (name == "just");
+}
+
 PitchResult NoteMapper::map(float frequency, float confidence, float rmsDb) const {
     PitchResult result;
 
@@ -30,7 +34,15 @@ PitchResult NoteMapper::map(float frequency, float confidence, float rmsDb) cons
         std::round(69.0f + 12.0f * std::log2(frequency / a4_))
     );
 
-    const float target = a4_ * std::pow(2.0f, (midi - 69) / 12.0f);
+    // Equal-temperament target
+    float target = a4_ * std::pow(2.0f, (midi - 69) / 12.0f);
+
+    // Apply just-intonation offset if enabled
+    if (useJust_) {
+        const int pitchClass = ((midi % 12) + 12) % 12; // 0=C .. 11=B
+        target *= std::pow(2.0f, kJustCentsOffset[pitchClass] / 1200.0f);
+    }
+
     const float cents = 1200.0f * std::log2(frequency / target);
 
     result.hasPitch = true;
@@ -38,7 +50,7 @@ PitchResult NoteMapper::map(float frequency, float confidence, float rmsDb) cons
     result.confidence = confidence;
     result.rmsDb = rmsDb;
     result.midiNote = midi;
-    result.noteName = names[midi % 12];
+    result.noteName = names[((midi % 12) + 12) % 12];
     result.octave = midi / 12 - 1;
     result.targetFrequency = target;
     result.cents = cents;
