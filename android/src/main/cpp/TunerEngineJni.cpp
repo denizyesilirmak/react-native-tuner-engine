@@ -74,7 +74,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
 JNIEXPORT void JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeInit(
     JNIEnv* env, jobject thiz,
-    jfloat sampleRate, jint frameSize
+    jfloat sampleRate, jint frameSize, jfloat overlapRatio
 ) {
     // Store strong global ref to the Kotlin module object for callbacks
     if (gModuleRef) env->DeleteGlobalRef(gModuleRef);
@@ -88,10 +88,11 @@ Java_com_tunerengine_TunerEngineModule_nativeInit(
     gDispatcher = std::make_unique<AudioFrameDispatcher>(
         static_cast<int>(frameSize),
         static_cast<float>(sampleRate),
-        onPitchResult
+        onPitchResult,
+        static_cast<float>(overlapRatio)
     );
 
-    LOGI("nativeInit: sampleRate=%.0f frameSize=%d", (float)sampleRate, (int)frameSize);
+    LOGI("nativeInit: sampleRate=%.0f frameSize=%d overlapRatio=%.2f", (float)sampleRate, (int)frameSize, (float)overlapRatio);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -99,7 +100,7 @@ Java_com_tunerengine_TunerEngineModule_nativeStart(
     JNIEnv* env, jobject thiz
 ) {
     if (!gDispatcher) {
-        Java_com_tunerengine_TunerEngineModule_nativeInit(env, thiz, 48000.0f, 2048);
+        Java_com_tunerengine_TunerEngineModule_nativeInit(env, thiz, 48000.0f, 2048, 0.0f);
     }
 
     gAudioSource = std::make_shared<OboeAudioSource>(
@@ -147,9 +148,9 @@ Java_com_tunerengine_TunerEngineModule_nativeConfigure(
     jfloat sampleRate, jint frameSize,
     jfloat noiseGateDb, jfloat confidenceThreshold,
     jfloat minFrequency, jfloat maxFrequency,
-    jfloat a4
+    jfloat a4, jfloat overlapRatio
 ) {
-    Java_com_tunerengine_TunerEngineModule_nativeInit(env, thiz, sampleRate, frameSize);
+    Java_com_tunerengine_TunerEngineModule_nativeInit(env, thiz, sampleRate, frameSize, overlapRatio);
     if (gDispatcher) {
         gDispatcher->setNoiseGateDb(noiseGateDb);
         gDispatcher->setConfidenceThreshold(confidenceThreshold);

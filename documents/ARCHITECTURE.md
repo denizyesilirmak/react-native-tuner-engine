@@ -103,6 +103,35 @@ Dark-themed tuner UI using only React Native built-ins:
 
 ---
 
+## M8 — Adaptive Frame Size & Overlap
+
+Low-frequency instruments (bass guitar E1 = 41 Hz, cello C2 = 65 Hz) need larger analysis windows. YIN's autocorrelation searches up to lag = frameSize/2, so frame=2048 @ 48 kHz only resolves down to ~46.9 Hz — not enough for bass.
+
+**Changes:**
+
+- **`AudioFrameDispatcher`** — sliding window worker loop. Instead of popping a full frame per cycle, pops only `hopSize` new samples and shifts the existing buffer (`memmove`). Cold-start fills the full frame on the first pass.
+  - `overlapRatio` (0.0–0.75) → `hopSize = frameSize * (1 - overlapRatio)`
+  - `reconfigure(newFrameSize, sampleRate)` — stops worker, reallocates, restarts
+  - `setOverlapRatio(float)` — runtime change, thread-safe
+- **`InstrumentPresets`** — new `instrumentRecommendedFrameSize()`: bass/cello → 4096, others → 2048
+- **`setInstrument()`** — now triggers `reconfigure()` if the preset's recommended frame size differs from current
+- **`TunerConfig`** (TypeScript) — three new fields: `overlapRatio`, `adaptiveFrameSize`, `quality`
+- **`QualityPreset`** type — `'low-latency'` | `'balanced'` | `'high-accuracy'`
+- **Native bridges** — iOS `TunerBridge.mm` and Android `TunerEngineJni.cpp` / `TunerEngineModule.kt` pass `overlapRatio` to the dispatcher constructor
+- **Example app** — Quality Preset picker + Overlap Ratio slider in Settings
+
+**Benchmark (M1 Mac, frame=4096 @ 48 kHz, 75% overlap, hop=1024):**
+```
+YIN          :  1.43 ms/frame
+PYIN         :  1.44 ms/frame
+Cepstrum     :  0.11 ms/frame
+Full pipeline:  3.01 ms/frame  → 14.1% single-core CPU (hop every 21.3 ms)
+```
+
+Bass E1 (41.2 Hz) now detects correctly with 4096 frame size.
+
+---
+
 ## Key files
 
 ```
