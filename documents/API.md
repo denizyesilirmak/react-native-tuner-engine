@@ -372,12 +372,12 @@ type EngineStatus = {
 │       │                                                                  │
 │       ▼                                                                  │
 │  ┌─────────────────────┐                                                 │
-│  │ Lock-free Ring Buffer│ ◄── Audio thread pushes PCM float samples      │
+│  │ LockFreeRingBuffer. │ ◄── Audio thread pushes PCM float samples       │
 │  └──────────┬──────────┘                                                 │
-│             │ Worker thread pops fixed-size frames                        │
+│             │ Worker thread pops fixed-size frames                       │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ High-Pass Filter     │  Biquad HPF (removes DC + rumble)              │
+│  │ High-Pass Filter    │  Biquad HPF (removes DC + rumble)               │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
@@ -385,11 +385,11 @@ type EngineStatus = {
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Onset Detector       │  Energy rise → resets PostProcessor (optional) │
+│  │ Onset Detector      │  Energy rise → resets PostProcessor (optional)  │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Hann Window          │  Spectral leakage reduction                    │
+│  │ Hann Window         │  Spectral leakage reduction                     │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────────────────────────┐                             │
@@ -401,19 +401,19 @@ type EngineStatus = {
 │  └──────────┬──────────────────────────────┘                             │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Ensemble Selector    │  Picks most consistent result across detectors │
+│  │ Ensemble Selector   │  Picks most consistent result across detectors  │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ PostProcessor        │  Median-5 → EMA smooth → hysteresis            │
+│  │ PostProcessor       │  Median-5 → EMA smooth → hysteresis             │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Note Mapper          │  freq → MIDI note → name + octave + cents      │
+│  │ Note Mapper         │  freq → MIDI note → name + octave + cents       │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ String Matcher       │  freq → nearest string + deviation (optional)  │
+│  │ String Matcher      │  freq → nearest string + deviation (optional)   │
 │  └──────────┬──────────┘                                                 │
 │             │                                                            │
 └─────────────┼────────────────────────────────────────────────────────────┘
@@ -433,7 +433,7 @@ type EngineStatus = {
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  JAVASCRIPT                                                              │
 │                                                                          │
-│  • JSI path: globalThis.__tunerEngineOnPitch(event)  ← zero-copy        │
+│  • JSI path: globalThis.__tunerEngineOnPitch(event)  ← zero-copy         │
 │  • Fallback: DeviceEventEmitter "onPitch" listener                       │
 │                                                                          │
 │  useTuner hook:  latest state updates → React re-render                  │
