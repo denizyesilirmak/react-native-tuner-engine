@@ -29,6 +29,7 @@ import type {
   EngineStatus,
   Instrument,
   PitchEvent,
+  QualityPreset,
   Temperament,
   TunerConfig,
   TuningPreset,
@@ -251,8 +252,25 @@ type TunerConfig = {
   hysteresisFrames?: number;     // Default: 3. Frames needed to confirm note change (1–10).
   hpfCutoffHz?: number;          // Default: 70. High-pass filter cutoff in Hz (20–300).
   onsetDetection?: boolean;      // Default: false. Resets PostProcessor on note attacks for faster response.
+  overlapRatio?: number;         // Default: 0. Frame overlap (0.0–0.75). Higher = more updates, more CPU.
+  adaptiveFrameSize?: boolean;   // Default: true. Auto-select frame size per instrument preset.
+  quality?: QualityPreset;       // Overrides frameSize + overlapRatio with a named preset.
 };
 ```
+
+**Overlap & Adaptive Frame Size:**
+
+The `overlapRatio` controls how much of the analysis frame overlaps with the previous frame. With 75% overlap and 2048 frame size, the engine produces pitch updates every ~10.7ms instead of every ~42.7ms.
+
+When `adaptiveFrameSize` is `true` (default), setting the instrument to `'bass'` or `'cello'` automatically switches to a 4096-sample frame for better low-frequency resolution (min detectable drops from 46.9 Hz to 23.4 Hz at 48 kHz). Explicitly setting `frameSize` overrides this behavior.
+
+The `quality` preset is a shorthand:
+
+| Preset | Frame Size | Overlap | Update Rate | Best For |
+|--------|-----------|---------|-------------|----------|
+| `'low-latency'` | 1024 | 0% | ~21 ms | Real-time feedback, high strings |
+| `'balanced'` | 2048 | 50% | ~21 ms | General use |
+| `'high-accuracy'` | 4096 | 75% | ~21 ms | Bass guitar, cello |
 
 ---
 
@@ -323,6 +341,16 @@ Currently only `'equal'` is implemented. `'just'` intonation is planned for a fu
 
 ---
 
+### `QualityPreset`
+
+```typescript
+type QualityPreset = 'low-latency' | 'balanced' | 'high-accuracy';
+```
+
+A convenience type that configures `frameSize` and `overlapRatio` together. See [TunerConfig](#tunerconfig) for the mapping table.
+
+---
+
 ### `EngineStatus`
 
 ```typescript
@@ -344,12 +372,12 @@ type EngineStatus = {
 │       │                                                                  │
 │       ▼                                                                  │
 │  ┌─────────────────────┐                                                 │
-│  │ Lock-free Ring Buffer│ ◄── Audio thread pushes PCM float samples      │
+│  │ LockFreeRingBuffer. │ ◄── Audio thread pushes PCM float samples       │
 │  └──────────┬──────────┘                                                 │
-│             │ Worker thread pops fixed-size frames                        │
+│             │ Worker thread pops fixed-size frames                       │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ High-Pass Filter     │  Biquad HPF (removes DC + rumble)              │
+│  │ High-Pass Filter    │  Biquad HPF (removes DC + rumble)               │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
@@ -357,11 +385,11 @@ type EngineStatus = {
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Onset Detector       │  Energy rise → resets PostProcessor (optional) │
+│  │ Onset Detector      │  Energy rise → resets PostProcessor (optional)  │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Hann Window          │  Spectral leakage reduction                    │
+│  │ Hann Window         │  Spectral leakage reduction                     │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────────────────────────┐                             │
@@ -373,19 +401,19 @@ type EngineStatus = {
 │  └──────────┬──────────────────────────────┘                             │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Ensemble Selector    │  Picks most consistent result across detectors │
+│  │ Ensemble Selector   │  Picks most consistent result across detectors  │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ PostProcessor        │  Median-5 → EMA smooth → hysteresis            │
+│  │ PostProcessor       │  Median-5 → EMA smooth → hysteresis             │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ Note Mapper          │  freq → MIDI note → name + octave + cents      │
+│  │ Note Mapper         │  freq → MIDI note → name + octave + cents       │
 │  └──────────┬──────────┘                                                 │
 │             ▼                                                            │
 │  ┌─────────────────────┐                                                 │
-│  │ String Matcher       │  freq → nearest string + deviation (optional)  │
+│  │ String Matcher      │  freq → nearest string + deviation (optional)   │
 │  └──────────┬──────────┘                                                 │
 │             │                                                            │
 └─────────────┼────────────────────────────────────────────────────────────┘
@@ -405,7 +433,7 @@ type EngineStatus = {
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  JAVASCRIPT                                                              │
 │                                                                          │
-│  • JSI path: globalThis.__tunerEngineOnPitch(event)  ← zero-copy        │
+│  • JSI path: globalThis.__tunerEngineOnPitch(event)  ← zero-copy         │
 │  • Fallback: DeviceEventEmitter "onPitch" listener                       │
 │                                                                          │
 │  useTuner hook:  latest state updates → React re-render                  │

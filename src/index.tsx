@@ -4,6 +4,7 @@ export type {
   EngineStatus,
   Instrument,
   PitchEvent,
+  QualityPreset,
   Temperament,
   TunerConfig,
   TuningPreset,

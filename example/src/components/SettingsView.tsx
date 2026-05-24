@@ -1,8 +1,15 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import type { Instrument } from 'react-native-tuner-engine';
+import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import type { Instrument, QualityPreset } from 'react-native-tuner-engine';
 import { InstrumentPicker } from './InstrumentPicker';
 import { SettingRow } from './SettingRow';
+
+const QUALITY_OPTIONS: { label: string; value: QualityPreset | undefined }[] = [
+  { label: 'Auto', value: undefined },
+  { label: 'Low Latency', value: 'low-latency' },
+  { label: 'Balanced', value: 'balanced' },
+  { label: 'High Accuracy', value: 'high-accuracy' },
+];
 
 type SettingsViewProps = Readonly<{
   instrument: Instrument;
@@ -15,6 +22,8 @@ type SettingsViewProps = Readonly<{
   minFrequency: number;
   maxFrequency: number;
   onsetDetection: boolean;
+  quality: QualityPreset | undefined;
+  overlapRatio: number;
   onInstrumentChange: (v: Instrument) => void;
   onA4Change: (v: number) => void;
   onNoiseGateDbChange: (v: number) => void;
@@ -25,6 +34,8 @@ type SettingsViewProps = Readonly<{
   onMinFrequencyChange: (v: number) => void;
   onMaxFrequencyChange: (v: number) => void;
   onOnsetDetectionChange: (v: boolean) => void;
+  onQualityChange: (v: QualityPreset | undefined) => void;
+  onOverlapRatioChange: (v: number) => void;
 }>;
 
 export function SettingsView({
@@ -38,6 +49,8 @@ export function SettingsView({
   minFrequency,
   maxFrequency,
   onsetDetection,
+  quality,
+  overlapRatio,
   onInstrumentChange,
   onA4Change,
   onNoiseGateDbChange,
@@ -48,10 +61,45 @@ export function SettingsView({
   onMinFrequencyChange,
   onMaxFrequencyChange,
   onOnsetDetectionChange,
+  onQualityChange,
+  onOverlapRatioChange,
 }: SettingsViewProps) {
   return (
     <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsContent}>
       <InstrumentPicker value={instrument} onChange={onInstrumentChange} />
+
+      {/* Quality Preset Picker */}
+      <Text style={styles.sectionLabel}>Quality Preset</Text>
+      <View style={styles.qualityRow}>
+        {QUALITY_OPTIONS.map((opt) => (
+          <TouchableOpacity
+            key={opt.label}
+            style={[
+              styles.qualityBtn,
+              quality === opt.value && styles.qualityBtnActive,
+            ]}
+            onPress={() => onQualityChange(opt.value)}
+          >
+            <Text
+              style={[
+                styles.qualityBtnText,
+                quality === opt.value && styles.qualityBtnTextActive,
+              ]}
+            >
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <SettingRow
+        label="Overlap Ratio"
+        value={overlapRatio}
+        min={0}
+        max={0.75}
+        step={0.25}
+        onChange={onOverlapRatioChange}
+      />
 
       <SettingRow
         label="A4 Reference"
@@ -164,5 +212,37 @@ const styles = StyleSheet.create({
     color: '#ccc',
     fontSize: 14,
     fontWeight: '600',
+  },
+  sectionLabel: {
+    color: '#ccc',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  qualityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 24,
+  },
+  qualityBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  qualityBtnActive: {
+    backgroundColor: '#27ae60',
+    borderColor: '#27ae60',
+  },
+  qualityBtnText: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  qualityBtnTextActive: {
+    color: '#fff',
   },
 });
