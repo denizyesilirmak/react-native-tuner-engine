@@ -37,6 +37,10 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
       nativeSetPostProcessorConfig(emaAlpha ?: 0.35f, hysteresisFrames ?: 3)
     }
 
+    if (opts?.hasKey("onsetDetection") == true) {
+      nativeSetOnsetDetection(opts.getBoolean("onsetDetection"))
+    }
+
     promise.resolve(null)
   }
 
@@ -163,6 +167,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetTuning(name: String)
   private external fun nativeSetHpfCutoff(hz: Float)
   private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
+  private external fun nativeSetOnsetDetection(enabled: Boolean)
   private external fun nativeIsRunning(): Boolean
 
   companion object {

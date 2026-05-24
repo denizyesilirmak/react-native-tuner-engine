@@ -11,6 +11,7 @@ add_library(tuner_engine_core STATIC
     src/Window.cpp
     src/BiquadHpf.cpp
     src/SnrEstimator.cpp
+    src/OnsetDetector.cpp
     src/PostProcessor.cpp
     src/Pipeline.cpp
     src/TunerEngine.cpp

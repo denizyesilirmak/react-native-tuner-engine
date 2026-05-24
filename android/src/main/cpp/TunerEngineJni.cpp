@@ -4,6 +4,7 @@
 #include <string>
 #include "AudioFrameDispatcher.hpp"
 #include "OboeAudioSource.h"
+#include "OnsetDetector.hpp"
 #include "PostProcessor.hpp"
 
 #define LOG_TAG "TunerEngineJni"
@@ -206,6 +207,13 @@ Java_com_tunerengine_TunerEngineModule_nativeIsRunning(
     JNIEnv* /*env*/, jobject /*thiz*/
 ) {
     return static_cast<jboolean>(gAudioSource != nullptr);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetOnsetDetection(
+    JNIEnv* /*env*/, jobject /*thiz*/, jboolean enabled
+) {
+    if (gDispatcher) gDispatcher->setOnsetDetectionEnabled(static_cast<bool>(enabled));
 }
 
 } // extern "C"
