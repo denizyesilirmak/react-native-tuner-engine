@@ -80,8 +80,14 @@ export type TunerConfig = {
 
 export type TuningPreset =
   | 'guitar_standard'
+  | 'guitar_eb_standard'
+  | 'guitar_d_standard'
   | 'guitar_drop_d'
+  | 'guitar_drop_c'
   | 'guitar_open_g'
+  | 'guitar_open_d'
+  | 'guitar_open_c'
+  | 'guitar_dadgad'
   | 'bass_standard'
   | 'bass_drop_d'
   | 'violin_standard'

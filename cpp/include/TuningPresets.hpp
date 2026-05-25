@@ -31,10 +31,52 @@ inline constexpr TuningProfile guitar_drop_d = {
     6
 };
 
+inline constexpr TuningProfile guitar_eb_standard = {
+    "guitar_eb_standard",
+    {{"Eb2",1,77.78f},{"Ab2",2,103.83f},{"Db3",3,138.59f},
+     {"Gb3",4,185.00f},{"Bb3",5,233.08f},{"Eb4",6,311.13f}},
+    6
+};
+
+inline constexpr TuningProfile guitar_d_standard = {
+    "guitar_d_standard",
+    {{"D2",1,73.42f},{"G2",2,98.00f},{"C3",3,130.81f},
+     {"F3",4,174.61f},{"A3",5,220.00f},{"D4",6,293.66f}},
+    6
+};
+
+inline constexpr TuningProfile guitar_drop_c = {
+    "guitar_drop_c",
+    {{"C2",1,65.41f},{"G2",2,98.00f},{"C3",3,130.81f},
+     {"F3",4,174.61f},{"A3",5,220.00f},{"D4",6,293.66f}},
+    6
+};
+
 inline constexpr TuningProfile guitar_open_g = {
     "guitar_open_g",
     {{"D2",1,73.42f},{"G2",2,98.00f},{"D3",3,146.83f},
      {"G3",4,196.00f},{"B3",5,246.94f},{"D4",6,293.66f}},
+    6
+};
+
+inline constexpr TuningProfile guitar_open_d = {
+    "guitar_open_d",
+    {{"D2",1,73.42f},{"A2",2,110.00f},{"D3",3,146.83f},
+     {"F#3",4,185.00f},{"A3",5,220.00f},{"D4",6,293.66f}},
+    6
+};
+
+inline constexpr TuningProfile guitar_open_c = {
+    "guitar_open_c",
+    {{"C2",1,65.41f},{"G2",2,98.00f},{"C3",3,130.81f},
+     {"G3",4,196.00f},{"C4",5,261.63f},{"E4",6,329.63f}},
+    6
+};
+
+inline constexpr TuningProfile guitar_dadgad = {
+    "guitar_dadgad",
+    {{"D2",1,73.42f},{"A2",2,110.00f},{"D3",3,146.83f},
+     {"G3",4,196.00f},{"A3",5,220.00f},{"D4",6,293.66f}},
     6
 };
 
@@ -78,10 +120,16 @@ inline constexpr TuningProfile ukulele_standard = {
 
 // Returns a pointer to a built-in TuningProfile by name, or nullptr for unknown names.
 inline const TuningProfile* tuningPreset(const std::string& name) {
-    if (name == "guitar_standard") return &tuning_presets::guitar_standard;
-    if (name == "guitar_drop_d")   return &tuning_presets::guitar_drop_d;
-    if (name == "guitar_open_g")   return &tuning_presets::guitar_open_g;
-    if (name == "bass_standard")   return &tuning_presets::bass_standard;
+    if (name == "guitar_standard")    return &tuning_presets::guitar_standard;
+    if (name == "guitar_eb_standard") return &tuning_presets::guitar_eb_standard;
+    if (name == "guitar_d_standard")  return &tuning_presets::guitar_d_standard;
+    if (name == "guitar_drop_d")      return &tuning_presets::guitar_drop_d;
+    if (name == "guitar_drop_c")      return &tuning_presets::guitar_drop_c;
+    if (name == "guitar_open_g")      return &tuning_presets::guitar_open_g;
+    if (name == "guitar_open_d")      return &tuning_presets::guitar_open_d;
+    if (name == "guitar_open_c")      return &tuning_presets::guitar_open_c;
+    if (name == "guitar_dadgad")      return &tuning_presets::guitar_dadgad;
+    if (name == "bass_standard")      return &tuning_presets::bass_standard;
     if (name == "bass_drop_d")     return &tuning_presets::bass_drop_d;
     if (name == "violin_standard") return &tuning_presets::violin_standard;
     if (name == "viola_standard")  return &tuning_presets::viola_standard;

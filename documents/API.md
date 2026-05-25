@@ -318,15 +318,21 @@ type Instrument =
 
 ```typescript
 type TuningPreset =
-  | 'guitar_standard'    // E2 A2 D3 G3 B3 E4
-  | 'guitar_drop_d'      // D2 A2 D3 G3 B3 E4
-  | 'guitar_open_g'      // D2 G2 D3 G3 B3 D4
-  | 'bass_standard'      // E1 A1 D2 G2
-  | 'bass_drop_d'        // D1 A1 D2 G2
-  | 'violin_standard'    // G3 D4 A4 E5
-  | 'viola_standard'     // C3 G3 D4 A4
-  | 'cello_standard'     // C2 G2 D3 A3
-  | 'ukulele_standard';  // G4 C4 E4 A4
+  | 'guitar_standard'      // E2 A2 D3 G3 B3 E4
+  | 'guitar_eb_standard'   // Eb2 Ab2 Db3 Gb3 Bb3 Eb4
+  | 'guitar_d_standard'    // D2 G2 C3 F3 A3 D4
+  | 'guitar_drop_d'        // D2 A2 D3 G3 B3 E4
+  | 'guitar_drop_c'        // C2 G2 C3 F3 A3 D4
+  | 'guitar_open_g'        // D2 G2 D3 G3 B3 D4
+  | 'guitar_open_d'        // D2 A2 D3 F#3 A3 D4
+  | 'guitar_open_c'        // C2 G2 C3 G3 C4 E4
+  | 'guitar_dadgad'        // D2 A2 D3 G3 A3 D4
+  | 'bass_standard'        // E1 A1 D2 G2
+  | 'bass_drop_d'          // D1 A1 D2 G2
+  | 'violin_standard'      // G3 D4 A4 E5
+  | 'viola_standard'       // C3 G3 D4 A4
+  | 'cello_standard'       // C2 G2 D3 A3
+  | 'ukulele_standard';    // G4 C4 E4 A4
 ```
 
 ---
