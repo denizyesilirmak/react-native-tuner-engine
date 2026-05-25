@@ -23,7 +23,35 @@ npm install react-native-tuner-engine
 yarn add react-native-tuner-engine
 ```
 
-### iOS
+### Expo
+
+Works with Expo **development builds** (not Expo Go). Add the plugin to your `app.json`:
+
+```json
+{
+  "expo": {
+    "plugins": ["react-native-tuner-engine"]
+  }
+}
+```
+
+To customize the iOS microphone permission message:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      ["react-native-tuner-engine", {
+        "microphonePermission": "Microphone access is required for pitch detection."
+      }]
+    ]
+  }
+}
+```
+
+Then rebuild with `npx expo prebuild` or EAS Build.
+
+### Bare React Native — iOS
 
 Add a microphone usage description to your app's `Info.plist`:
 
@@ -34,7 +62,7 @@ Add a microphone usage description to your app's `Info.plist`:
 
 Then run `pod install`.
 
-### Android
+### Bare React Native — Android
 
 The library's `AndroidManifest.xml` already declares `RECORD_AUDIO`. You still need to request the permission at runtime — use `requestPermission()` described below, or handle it yourself before calling `start()`.
 
