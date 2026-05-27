@@ -51,8 +51,9 @@ export function useTuner(opts: UseTunerOptions = {}): UseTunerResult {
       await TunerEngine.start();
       setIsRunning(true);
     } catch (e) {
+      unsubscribeRef.current?.();
+      unsubscribeRef.current = null;
       setError(e instanceof Error ? e : new Error(String(e)));
-      setIsRunning(false);
     }
   }, []);
 
