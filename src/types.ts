@@ -112,4 +112,15 @@ export type PitchEvent = {
 export type EngineStatus = {
   isRunning: boolean;
   engineReady: boolean;
+  /** Monotonic counter incremented on each pitch event. Use to detect new data when polling. */
+  seq: number;
+  hasPitch: boolean;
+  frequency: number;
+  confidence: number;
+  rmsDb: number;
+  noteName: string;
+  octave: number;
+  cents: number;
+  nearestString: string;
+  stringDeviation: number;
 };

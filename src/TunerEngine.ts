@@ -71,7 +71,7 @@ class TunerEngine {
   }
 
   getStatus(): EngineStatus {
-    return NativeTunerEngine.getStatus() as EngineStatus;
+    return NativeTunerEngine.getStatus() as unknown as EngineStatus;
   }
 
   onPitch(callback: PitchCallback): Unsubscribe {
@@ -85,7 +85,7 @@ class TunerEngine {
       const poll = () => {
         if (stopped) return;
         try {
-          const s = NativeTunerEngine.getStatus() as any;
+          const s = NativeTunerEngine.getStatus() as unknown as EngineStatus;
           if (s.seq !== lastSeq) {
             lastSeq = s.seq;
             callback({

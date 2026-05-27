@@ -8,12 +8,32 @@
   IosAudioSource* _audioSource;
   std::unique_ptr<AudioFrameDispatcher> _dispatcher;
   bool _isRunning;
+  uint64_t _seq;
+  bool _latestHasPitch;
+  float _latestFrequency;
+  float _latestConfidence;
+  float _latestRmsDb;
+  NSString* _latestNoteName;
+  int _latestOctave;
+  float _latestCents;
+  NSString* _latestNearestString;
+  float _latestStringDeviation;
 }
 
 - (instancetype)init {
   self = [super init];
   if (self) {
     _isRunning = false;
+    _seq = 0;
+    _latestHasPitch = false;
+    _latestFrequency = 0;
+    _latestConfidence = 0;
+    _latestRmsDb = 0;
+    _latestNoteName = @"";
+    _latestOctave = 0;
+    _latestCents = 0;
+    _latestNearestString = @"";
+    _latestStringDeviation = 0;
   }
   return self;
 }
@@ -33,6 +53,17 @@
     [weakSelf](const PitchResult& r) {
       __strong __typeof__(weakSelf) strongSelf = weakSelf;
       if (!strongSelf || !strongSelf.onPitch) return;
+
+      strongSelf->_seq++;
+      strongSelf->_latestHasPitch = r.hasPitch;
+      strongSelf->_latestFrequency = r.frequency;
+      strongSelf->_latestConfidence = r.confidence;
+      strongSelf->_latestRmsDb = r.rmsDb;
+      strongSelf->_latestNoteName = @(r.noteName.c_str());
+      strongSelf->_latestOctave = r.octave;
+      strongSelf->_latestCents = r.cents;
+      strongSelf->_latestNearestString = @(r.nearestString.c_str());
+      strongSelf->_latestStringDeviation = r.stringDeviation;
 
       NSDictionary* event = @{
         @"hasPitch":         @(r.hasPitch),
@@ -133,8 +164,18 @@
 
 - (NSDictionary *)getStatus {
   return @{
-    @"isRunning":    @(_isRunning),
-    @"engineReady":  @(_dispatcher != nullptr)
+    @"isRunning":       @(_isRunning),
+    @"engineReady":     @(_dispatcher != nullptr),
+    @"seq":             @(_seq),
+    @"hasPitch":        @(_latestHasPitch),
+    @"frequency":       @(_latestFrequency),
+    @"confidence":      @(_latestConfidence),
+    @"rmsDb":           @(_latestRmsDb),
+    @"noteName":        _latestNoteName,
+    @"octave":          @(_latestOctave),
+    @"cents":           @(_latestCents),
+    @"nearestString":   _latestNearestString,
+    @"stringDeviation": @(_latestStringDeviation),
   };
 }
 
