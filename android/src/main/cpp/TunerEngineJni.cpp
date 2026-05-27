@@ -4,6 +4,10 @@
 #include <mutex>
 #include <atomic>
 #include <string>
+#include <fbjni/fbjni.h>
+#include <jsi/jsi.h>
+#include <ReactCommon/CallInvoker.h>
+#include <ReactCommon/CallInvokerHolder.h>
 #include "AudioFrameDispatcher.hpp"
 #include "OboeAudioSource.h"
 #include "OnsetDetector.hpp"
@@ -16,6 +20,7 @@
 // Globals — one engine per process (single-instance module assumption).
 // All access must hold gMutex, except:
 //   - gJvm: written once in JNI_OnLoad, then read-only
+//   - gJsInvoker: accessed via std::atomic_load/store (lock-free shared_ptr)
 //   - gModuleRef / gOnPitchMethod: written only while dispatcher worker is
 //     joined (so onPitchResult cannot be in-flight), therefore safe to read
 //     from the worker without the mutex
@@ -27,15 +32,68 @@ static std::shared_ptr<OboeAudioSource> gAudioSource;
 // Written under gMutex; read lock-free from the audio thread.
 static std::atomic<AudioFrameDispatcher*> gDispatcherAtomic{nullptr};
 
+// JSI call invoker — set once from initialize(), read from worker thread.
+// std::atomic_load/store is used for lock-free, thread-safe shared_ptr access.
+static std::shared_ptr<facebook::react::CallInvoker> gJsInvoker;
+
+// JNI back-reference for Kotlin-side pitch snapshot update (getStatus()).
 static JavaVM* gJvm = nullptr;
 static jobject gModuleRef = nullptr;
 static jmethodID gOnPitchMethod = nullptr;
 
 // Called from AudioFrameDispatcher's worker thread.
-// gModuleRef and gOnPitchMethod are stable here: they are only replaced after
-// the worker is joined (see initDispatcherLocked), so they cannot change
-// while this function is executing.
+//
+// Two delivery paths run in order:
+//   1. JSI (Bridgeless / New Arch): schedules a direct call into JS via
+//      __tunerEngineOnPitch, mirroring the iOS implementation.
+//   2. JNI → Kotlin (always): updates the @Volatile snapshot fields so that
+//      getStatus() returns fresh data regardless of which path is active.
+//
+// gModuleRef and gOnPitchMethod are stable during execution: they are only
+// replaced after the worker is joined (see initDispatcherLocked), so they
+// cannot change while this function is executing.
 static void onPitchResult(const PitchResult& r) {
+    // ── Path 1: JSI direct call ──────────────────────────────────────────────
+    auto jsInvoker = std::atomic_load(&gJsInvoker);
+    if (jsInvoker) {
+        bool   hasPitch    = r.hasPitch;
+        double frequency   = r.frequency;
+        double confidence  = r.confidence;
+        double rmsDb       = r.rmsDb;
+        std::string note   = r.noteName;
+        int    octave      = r.octave;
+        double cents       = r.cents;
+        std::string nearestStr = r.nearestString;
+        double stringDev   = r.stringDeviation;
+
+        jsInvoker->invokeAsync(
+            [hasPitch, frequency, confidence, rmsDb,
+             note, octave, cents, nearestStr, stringDev]
+            (facebook::jsi::Runtime& rt) {
+                auto cb = rt.global().getProperty(rt, "__tunerEngineOnPitch");
+                if (!cb.isObject()) return;
+                auto fn = cb.asObject(rt);
+                if (!fn.isFunction(rt)) return;
+
+                facebook::jsi::Object obj(rt);
+                obj.setProperty(rt, "hasPitch",        facebook::jsi::Value(hasPitch));
+                obj.setProperty(rt, "frequency",        facebook::jsi::Value(frequency));
+                obj.setProperty(rt, "confidence",       facebook::jsi::Value(confidence));
+                obj.setProperty(rt, "rmsDb",            facebook::jsi::Value(rmsDb));
+                obj.setProperty(rt, "noteName",
+                    facebook::jsi::String::createFromUtf8(rt, note));
+                obj.setProperty(rt, "octave",           facebook::jsi::Value(octave));
+                obj.setProperty(rt, "cents",            facebook::jsi::Value(cents));
+                obj.setProperty(rt, "nearestString",
+                    facebook::jsi::String::createFromUtf8(rt, nearestStr));
+                obj.setProperty(rt, "stringDeviation",  facebook::jsi::Value(stringDev));
+
+                fn.asFunction(rt).call(rt, std::move(obj));
+            }
+        );
+    }
+
+    // ── Path 2: JNI → Kotlin (snapshot update for getStatus()) ──────────────
     if (!gJvm || !gModuleRef || !gOnPitchMethod) return;
 
     JNIEnv* env = nullptr;
@@ -102,8 +160,6 @@ static void initDispatcherLocked(
         frameSize, sampleRate, onPitchResult, overlapRatio
     );
 
-    // Let the audio callback push to the new dispatcher.
-    // The dispatcher worker is not started here; nativeStart() calls start().
     gDispatcherAtomic.store(gDispatcher.get(), std::memory_order_release);
 
     LOGI("nativeInit: sampleRate=%.0f frameSize=%d overlapRatio=%.2f",
@@ -112,9 +168,25 @@ static void initDispatcherLocked(
 
 extern "C" {
 
-JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
+JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     gJvm = vm;
-    return JNI_VERSION_1_6;
+    // Initialize fbjni so HybridClass internals (field IDs, type registration)
+    // are set up for this library. Safe to call from multiple libraries.
+    return facebook::jni::initialize(vm, []() {});
+}
+
+// Called from TunerEngineModule.initialize() once the JS context is ready.
+// Stores the JSI CallInvoker for direct-to-JS event delivery (Bridgeless mode).
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetCallInvoker(
+    JNIEnv* /*env*/, jobject /*thiz*/, jobject callInvokerHolder
+) {
+    if (!callInvokerHolder) return;
+    auto holder = jni::alias_ref<facebook::react::CallInvokerHolder::javaobject>{
+        reinterpret_cast<facebook::react::CallInvokerHolder::javaobject>(callInvokerHolder)
+    };
+    std::atomic_store(&gJsInvoker, holder->cthis()->getCallInvoker());
+    LOGI("JSI CallInvoker registered — direct event delivery active");
 }
 
 JNIEXPORT void JNICALL
