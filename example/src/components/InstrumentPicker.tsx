@@ -3,7 +3,15 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { Instrument } from 'react-native-tuner-engine';
 
 const INSTRUMENTS: Instrument[] = [
-  'guitar', 'bass', 'violin', 'viola', 'cello', 'ukulele', 'mandolin', 'banjo', 'chromatic',
+  'guitar',
+  'bass',
+  'violin',
+  'viola',
+  'cello',
+  'ukulele',
+  'mandolin',
+  'banjo',
+  'chromatic',
 ];
 
 export function InstrumentPicker({
@@ -23,7 +31,9 @@ export function InstrumentPicker({
             style={[styles.chip, value === inst && styles.chipActive]}
             onPress={() => onChange(inst)}
           >
-            <Text style={[styles.chipText, value === inst && styles.chipTextActive]}>
+            <Text
+              style={[styles.chipText, value === inst && styles.chipTextActive]}
+            >
               {inst}
             </Text>
           </TouchableOpacity>

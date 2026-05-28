@@ -14,7 +14,10 @@ import type {
 type PitchCallback = (event: PitchEvent) => void;
 type Unsubscribe = () => void;
 
-const QUALITY_PRESETS: Record<QualityPreset, { frameSize: number; overlapRatio: number }> = {
+const QUALITY_PRESETS: Record<
+  QualityPreset,
+  { frameSize: number; overlapRatio: number }
+> = {
   'low-latency': { frameSize: 1024, overlapRatio: 0 },
   'balanced': { frameSize: 2048, overlapRatio: 0.5 },
   'high-accuracy': { frameSize: 4096, overlapRatio: 0.75 },
@@ -76,7 +79,11 @@ class TunerEngine {
   }
 
   setTuning(name: TuningPreset | ''): void {
-    if (__DEV__ && name !== '' && !(TUNING_PRESETS as readonly string[]).includes(name)) {
+    if (
+      __DEV__ &&
+      name !== '' &&
+      !(TUNING_PRESETS as readonly string[]).includes(name)
+    ) {
       console.warn(`[TunerEngine] Unknown tuning preset: "${name}"`);
       return;
     }

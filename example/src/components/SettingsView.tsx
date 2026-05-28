@@ -1,5 +1,12 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import type { Instrument, QualityPreset } from 'react-native-tuner-engine';
 import { InstrumentPicker } from './InstrumentPicker';
 import { SettingRow } from './SettingRow';
@@ -65,7 +72,10 @@ export function SettingsView({
   onOverlapRatioChange,
 }: SettingsViewProps) {
   return (
-    <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsContent}>
+    <ScrollView
+      style={styles.settingsScroll}
+      contentContainerStyle={styles.settingsContent}
+    >
       <InstrumentPicker value={instrument} onChange={onInstrumentChange} />
 
       {/* Quality Preset Picker */}

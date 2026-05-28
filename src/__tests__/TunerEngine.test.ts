@@ -1,10 +1,4 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  it,
-  jest,
-} from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { DeviceEventEmitter } from 'react-native';
 import TunerEngine from '../TunerEngine';
 import NativeTunerEngine from '../NativeTunerEngine';
@@ -15,7 +9,9 @@ jest.mock('../NativeTunerEngine', () => ({
     configure: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     start: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     stop: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    requestPermission: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+    requestPermission: jest
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValue(true),
     setA4: jest.fn(),
     setInstrument: jest.fn(),
     setTemperament: jest.fn(),
@@ -65,7 +61,9 @@ describe('TunerEngine', () => {
   });
 
   it('returns false when permission is denied', async () => {
-    (native.requestPermission as jest.Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
+    (
+      native.requestPermission as jest.Mock<() => Promise<boolean>>
+    ).mockResolvedValueOnce(false);
     const result = await TunerEngine.requestPermission();
     expect(result).toBe(false);
   });

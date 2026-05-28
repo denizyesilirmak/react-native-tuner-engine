@@ -40,7 +40,6 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         {/* Tab Bar */}
         <View style={styles.tabBar}>
@@ -48,13 +47,22 @@ export default function App() {
             style={[styles.tabBtn, tab === 'tuner' && styles.tabBtnActive]}
             onPress={() => setTab('tuner')}
           >
-            <Text style={[styles.tabText, tab === 'tuner' && styles.tabTextActive]}>Tuner</Text>
+            <Text
+              style={[styles.tabText, tab === 'tuner' && styles.tabTextActive]}
+            >
+              Tuner
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabBtn, tab === 'settings' && styles.tabBtnActive]}
             onPress={() => setTab('settings')}
           >
-            <Text style={[styles.tabText, tab === 'settings' && styles.tabTextActive]}>
+            <Text
+              style={[
+                styles.tabText,
+                tab === 'settings' && styles.tabTextActive,
+              ]}
+            >
               Settings
             </Text>
           </TouchableOpacity>

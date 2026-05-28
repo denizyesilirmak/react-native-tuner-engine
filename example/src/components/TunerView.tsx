@@ -12,7 +12,13 @@ type TunerViewProps = Readonly<{
   onStop: () => void;
 }>;
 
-export function TunerView({ latest, isRunning, error, onStart, onStop }: TunerViewProps) {
+export function TunerView({
+  latest,
+  isRunning,
+  error,
+  onStart,
+  onStop,
+}: TunerViewProps) {
   const cents = latest?.hasPitch ? latest.cents : 0;
   const color = latest?.hasPitch ? centsColor(cents) : '#888';
 
@@ -44,7 +50,12 @@ export function TunerView({ latest, isRunning, error, onStart, onStop }: TunerVi
         {latest?.hasPitch && latest.nearestString ? (
           <>
             <Text style={styles.stringName}>{latest.nearestString}</Text>
-            <Text style={[styles.stringDeviation, { color: centsColor(latest.stringDeviation) }]}>
+            <Text
+              style={[
+                styles.stringDeviation,
+                { color: centsColor(latest.stringDeviation) },
+              ]}
+            >
               {latest.stringDeviation >= 0 ? '+' : ''}
               {latest.stringDeviation.toFixed(1)} ¢
             </Text>
@@ -60,7 +71,9 @@ export function TunerView({ latest, isRunning, error, onStart, onStop }: TunerVi
           {latest?.hasPitch ? `${latest.frequency.toFixed(1)} Hz` : ''}
         </Text>
         <Text style={styles.meta}>
-          {latest?.hasPitch ? `conf ${(latest.confidence * 100).toFixed(0)}%` : ''}
+          {latest?.hasPitch
+            ? `conf ${(latest.confidence * 100).toFixed(0)}%`
+            : ''}
         </Text>
         <Text style={styles.meta}>
           {latest ? `${latest.rmsDb.toFixed(0)} dB` : ''}
@@ -92,7 +105,13 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   note: { fontSize: 100, fontWeight: '700', lineHeight: 110 },
-  octave: { color: '#555', fontSize: 36, fontWeight: '400', marginBottom: 10, marginLeft: 4 },
+  octave: {
+    color: '#555',
+    fontSize: 36,
+    fontWeight: '400',
+    marginBottom: 10,
+    marginLeft: 4,
+  },
   noSignal: { color: '#444', fontSize: 32, lineHeight: 110 },
   centsLabel: {
     fontSize: 22,

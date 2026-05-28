@@ -32,13 +32,19 @@ export function Needle({ cents }: Readonly<{ cents: number }>) {
           key={t}
           style={[
             styles.tick,
-            { left: TRACK_WIDTH / 2 + (t / NEEDLE_RANGE) * (TRACK_WIDTH / 2) - 1 },
+            {
+              left:
+                TRACK_WIDTH / 2 + (t / NEEDLE_RANGE) * (TRACK_WIDTH / 2) - 1,
+            },
             t === 0 && styles.tickCenter,
           ]}
         />
       ))}
       <Animated.View
-        style={[styles.needleHead, { transform: [{ translateX }], backgroundColor: color }]}
+        style={[
+          styles.needleHead,
+          { transform: [{ translateX }], backgroundColor: color },
+        ]}
       />
     </View>
   );

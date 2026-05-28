@@ -26,8 +26,7 @@ function withTunerEngineMicrophoneAndroid(config) {
     }
 
     const hasPermission = manifest['uses-permission'].some(
-      (perm) =>
-        perm.$?.['android:name'] === 'android.permission.RECORD_AUDIO'
+      (perm) => perm.$?.['android:name'] === 'android.permission.RECORD_AUDIO'
     );
 
     if (!hasPermission) {
