@@ -10,6 +10,7 @@ import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.WritableNativeMap
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
+import com.facebook.react.turbomodule.core.interfaces.CallInvokerHolder
 
 class TunerEngineModule(reactContext: ReactApplicationContext) :
   NativeTunerEngineSpec(reactContext) {
@@ -184,7 +185,20 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     pitchSequence++
   }
 
+  override fun initialize() {
+    super.initialize()
+    // Wire up JSI direct-callback path for Bridgeless / New Arch.
+    // Falls back silently to the polling path if the invoker is unavailable.
+    try {
+      val holder = reactApplicationContext.getJSCallInvokerHolder()
+      if (holder != null) {
+        nativeSetCallInvoker(holder)
+      }
+    } catch (_: Throwable) {}
+  }
+
   // JNI methods
+  private external fun nativeSetCallInvoker(callInvokerHolder: CallInvokerHolder)
   private external fun nativeInit(sampleRate: Float, frameSize: Int, overlapRatio: Float)
   private external fun nativeStart(): Boolean
   private external fun nativeStop()

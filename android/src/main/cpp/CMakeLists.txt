@@ -12,6 +12,8 @@ add_subdirectory(
 )
 
 find_package(oboe REQUIRED CONFIG)
+find_package(ReactAndroid REQUIRED CONFIG)
+find_package(fbjni REQUIRED CONFIG)
 
 add_library(tunerengine SHARED
   TunerEngineJni.cpp
@@ -28,4 +30,7 @@ target_link_libraries(tunerengine
     oboe::oboe
     android
     log
+    ReactAndroid::jsi
+    ReactAndroid::reactnative
+    fbjni::fbjni
 )

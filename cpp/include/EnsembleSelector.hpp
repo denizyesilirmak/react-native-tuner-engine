@@ -18,8 +18,11 @@ public:
     void setThreshold(float threshold) override;
 
 private:
+    struct VoicedEntry { int idx; float freq; float conf; int votes; };
+
     std::vector<std::unique_ptr<IPitchDetector>> detectors_;
     std::vector<DetectorResult> resultsBuf_;
+    std::vector<VoicedEntry> voicedBuf_;
 
     static bool withinSemitones(float f1, float f2, float tolerance = 1.0f);
 };
