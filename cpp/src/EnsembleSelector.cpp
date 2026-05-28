@@ -6,6 +6,7 @@ EnsembleSelector::EnsembleSelector(std::vector<std::unique_ptr<IPitchDetector>> 
     : detectors_(std::move(detectors))
 {
     resultsBuf_.resize(detectors_.size());
+    voicedBuf_.reserve(detectors_.size());
 }
 
 void EnsembleSelector::reset() {
@@ -31,35 +32,30 @@ DetectorResult EnsembleSelector::detect(const float* frame, int n, float sampleR
         resultsBuf_[i] = detectors_[i]->detect(frame, n, sampleRate);
     }
 
-    // Work with a small stack-local view of voiced results to avoid heap allocation.
-    // Maximum 8 detectors is more than enough for any realistic ensemble.
-    struct Entry { int idx; float freq; float conf; int votes; };
-    Entry voiced[8];
-    int voicedCount = 0;
-
-    for (int i = 0; i < static_cast<int>(resultsBuf_.size()) && voicedCount < 8; ++i) {
+    voicedBuf_.clear();
+    for (int i = 0; i < static_cast<int>(resultsBuf_.size()); ++i) {
         const auto& r = resultsBuf_[i];
         if (r.voiced && r.confidence > 0.0f) {
-            voiced[voicedCount++] = {i, r.frequency, r.confidence, 0};
+            voicedBuf_.push_back({i, r.frequency, r.confidence, 0});
         }
     }
 
-    if (voicedCount == 0) return DetectorResult{};
+    if (voicedBuf_.empty()) return DetectorResult{};
 
     // Tally agreement votes between voiced entries
-    for (int i = 0; i < voicedCount; ++i) {
-        for (int j = i + 1; j < voicedCount; ++j) {
-            if (withinSemitones(voiced[i].freq, voiced[j].freq)) {
-                ++voiced[i].votes;
-                ++voiced[j].votes;
+    for (int i = 0; i < static_cast<int>(voicedBuf_.size()); ++i) {
+        for (int j = i + 1; j < static_cast<int>(voicedBuf_.size()); ++j) {
+            if (withinSemitones(voicedBuf_[i].freq, voicedBuf_[j].freq)) {
+                ++voicedBuf_[i].votes;
+                ++voicedBuf_[j].votes;
             }
         }
     }
 
     // Pick winner: most votes first, then highest confidence
-    const Entry* best = &voiced[0];
-    for (int i = 1; i < voicedCount; ++i) {
-        const Entry& c = voiced[i];
+    const VoicedEntry* best = &voicedBuf_[0];
+    for (int i = 1; i < static_cast<int>(voicedBuf_.size()); ++i) {
+        const VoicedEntry& c = voicedBuf_[i];
         if (c.votes > best->votes
             || (c.votes == best->votes && c.conf > best->conf)) {
             best = &c;
@@ -71,10 +67,10 @@ DetectorResult EnsembleSelector::detect(const float* frame, int n, float sampleR
     float confSum  = best->conf;
     int   agreeing = 1;
 
-    for (int i = 0; i < voicedCount; ++i) {
-        if (&voiced[i] != best && withinSemitones(voiced[i].freq, best->freq)) {
-            freqSum += voiced[i].freq;
-            confSum += voiced[i].conf;
+    for (int i = 0; i < static_cast<int>(voicedBuf_.size()); ++i) {
+        if (&voicedBuf_[i] != best && withinSemitones(voicedBuf_[i].freq, best->freq)) {
+            freqSum += voicedBuf_[i].freq;
+            confSum += voicedBuf_[i].conf;
             ++agreeing;
         }
     }

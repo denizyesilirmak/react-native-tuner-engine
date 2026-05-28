@@ -1,5 +1,6 @@
 import { Platform, DeviceEventEmitter } from 'react-native';
 import NativeTunerEngine from './NativeTunerEngine';
+import { INSTRUMENTS, TEMPERAMENTS, TUNING_PRESETS } from './types';
 import type {
   EngineStatus,
   Instrument,
@@ -59,14 +60,26 @@ class TunerEngine {
   }
 
   setInstrument(name: Instrument): void {
+    if (__DEV__ && !(INSTRUMENTS as readonly string[]).includes(name)) {
+      console.warn(`[TunerEngine] Unknown instrument: "${name}"`);
+      return;
+    }
     NativeTunerEngine.setInstrument(name);
   }
 
   setTemperament(name: Temperament): void {
+    if (__DEV__ && !(TEMPERAMENTS as readonly string[]).includes(name)) {
+      console.warn(`[TunerEngine] Unknown temperament: "${name}"`);
+      return;
+    }
     NativeTunerEngine.setTemperament(name);
   }
 
   setTuning(name: TuningPreset | ''): void {
+    if (__DEV__ && name !== '' && !(TUNING_PRESETS as readonly string[]).includes(name)) {
+      console.warn(`[TunerEngine] Unknown tuning preset: "${name}"`);
+      return;
+    }
     NativeTunerEngine.setTuning(name);
   }
 
