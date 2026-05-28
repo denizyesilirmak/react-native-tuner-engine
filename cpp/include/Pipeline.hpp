@@ -38,7 +38,7 @@ private:
     float sampleRate_;
 
     float noiseGateDb_           = -55.0f;
-    float confidenceThreshold_   =  0.60f; // lower than raw YIN default; SNR will tighten it
+    float confidenceThreshold_   =  0.75f;
 
     BiquadHpf hpf_;
     HannWindow window_;

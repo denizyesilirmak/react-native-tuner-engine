@@ -61,9 +61,12 @@ bool OboeAudioSource::start() {
 }
 
 void OboeAudioSource::stop() {
-    stopped_.store(true, std::memory_order_relaxed);
-    if (restartThread_.joinable()) {
-        restartThread_.join();
+    // Use seq_cst so onErrorAfterClose() on another thread is guaranteed to
+    // see stopped_=true before we try to join the restart thread.
+    stopped_.store(true, std::memory_order_seq_cst);
+    {
+        std::lock_guard<std::mutex> lock(restartMutex_);
+        if (restartThread_.joinable()) restartThread_.join();
     }
     if (stream_) {
         stream_->requestStop();
@@ -90,8 +93,10 @@ oboe::DataCallbackResult OboeAudioSource::onAudioReady(
 
 void OboeAudioSource::onErrorAfterClose(oboe::AudioStream* /*stream*/, oboe::Result error) {
     LOGE("Oboe stream error after close: %s — attempting restart", oboe::convertToText(error));
-    if (stopped_.load(std::memory_order_relaxed)) return;
-    // Restart on a separate thread to avoid deadlock; join in stop()/destructor
+    std::lock_guard<std::mutex> lock(restartMutex_);
+    // seq_cst load pairs with the seq_cst store in stop() — guarantees we
+    // see stopped_=true if stop() ran before we acquired the mutex.
+    if (stopped_.load(std::memory_order_seq_cst)) return;
     if (restartThread_.joinable()) restartThread_.join();
     restartThread_ = std::thread([this]() {
         if (!stopped_.load(std::memory_order_relaxed)) {

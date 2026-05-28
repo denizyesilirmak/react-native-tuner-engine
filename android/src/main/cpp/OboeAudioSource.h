@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 // Oboe-based microphone capture.
@@ -37,5 +38,6 @@ private:
     std::shared_ptr<oboe::AudioStream> stream_;
     float sampleRate_{48000.0f};
     std::atomic<bool> stopped_{false};
+    std::mutex restartMutex_;
     std::thread restartThread_;
 };
