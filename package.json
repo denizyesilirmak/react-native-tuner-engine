@@ -93,9 +93,9 @@
     "typescript": "^6.0.2"
   },
   "peerDependencies": {
+    "expo": ">=51.0.0",
     "react": "*",
-    "react-native": "*",
-    "expo": ">=51.0.0"
+    "react-native": "*"
   },
   "peerDependenciesMeta": {
     "expo": {
