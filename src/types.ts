@@ -1,15 +1,11 @@
-export type Instrument =
-  | 'guitar'
-  | 'bass'
-  | 'violin'
-  | 'viola'
-  | 'cello'
-  | 'ukulele'
-  | 'mandolin'
-  | 'banjo'
-  | 'chromatic';
+export const INSTRUMENTS = [
+  'guitar', 'bass', 'violin', 'viola', 'cello',
+  'ukulele', 'mandolin', 'banjo', 'chromatic',
+] as const;
+export type Instrument = typeof INSTRUMENTS[number];
 
-export type Temperament = 'equal' | 'just';
+export const TEMPERAMENTS = ['equal', 'just'] as const;
+export type Temperament = typeof TEMPERAMENTS[number];
 
 /**
  * Quality preset that maps to a frame size + overlap combination.
@@ -78,22 +74,15 @@ export type TunerConfig = {
   quality?: QualityPreset;
 };
 
-export type TuningPreset =
-  | 'guitar_standard'
-  | 'guitar_eb_standard'
-  | 'guitar_d_standard'
-  | 'guitar_drop_d'
-  | 'guitar_drop_c'
-  | 'guitar_open_g'
-  | 'guitar_open_d'
-  | 'guitar_open_c'
-  | 'guitar_dadgad'
-  | 'bass_standard'
-  | 'bass_drop_d'
-  | 'violin_standard'
-  | 'viola_standard'
-  | 'cello_standard'
-  | 'ukulele_standard';
+export const TUNING_PRESETS = [
+  'guitar_standard', 'guitar_eb_standard', 'guitar_d_standard',
+  'guitar_drop_d', 'guitar_drop_c', 'guitar_open_g',
+  'guitar_open_d', 'guitar_open_c', 'guitar_dadgad',
+  'bass_standard', 'bass_drop_d',
+  'violin_standard', 'viola_standard', 'cello_standard',
+  'ukulele_standard',
+] as const;
+export type TuningPreset = typeof TUNING_PRESETS[number];
 
 export type PitchEvent = {
   hasPitch: boolean;

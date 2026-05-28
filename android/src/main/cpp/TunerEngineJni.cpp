@@ -182,7 +182,7 @@ Java_com_tunerengine_TunerEngineModule_nativeSetCallInvoker(
     JNIEnv* /*env*/, jobject /*thiz*/, jobject callInvokerHolder
 ) {
     if (!callInvokerHolder) return;
-    auto holder = jni::alias_ref<facebook::react::CallInvokerHolder::javaobject>{
+    auto holder = facebook::jni::alias_ref<facebook::react::CallInvokerHolder::javaobject>{
         reinterpret_cast<facebook::react::CallInvokerHolder::javaobject>(callInvokerHolder)
     };
     std::atomic_store(&gJsInvoker, holder->cthis()->getCallInvoker());
@@ -270,12 +270,17 @@ Java_com_tunerengine_TunerEngineModule_nativeConfigure(
     jfloat a4, jfloat overlapRatio
 ) {
     std::lock_guard<std::mutex> lock(gMutex);
+    const bool wasRunning = (gAudioSource != nullptr);
     initDispatcherLocked(env, thiz, sampleRate, frameSize, overlapRatio);
     if (gDispatcher) {
         gDispatcher->setNoiseGateDb(noiseGateDb);
         gDispatcher->setConfidenceThreshold(confidenceThreshold);
         gDispatcher->setFrequencyRange(minFrequency, maxFrequency);
         gDispatcher->setA4(a4);
+        if (wasRunning) {
+            gDispatcher->setSampleRate(gAudioSource->sampleRate());
+            gDispatcher->start();
+        }
     }
 }
 

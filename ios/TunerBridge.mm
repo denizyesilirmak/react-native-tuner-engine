@@ -44,6 +44,11 @@
   float overlapRatio = opts[@"overlapRatio"] ? [opts[@"overlapRatio"] floatValue] : 0.0f;
 
   [self buildDispatcherWithSampleRate:sampleRate frameSize:frameSize overlapRatio:overlapRatio opts:opts];
+
+  if (_isRunning && _dispatcher && _audioSource) {
+    _dispatcher->setSampleRate(_audioSource.sampleRate);
+    _dispatcher->start();
+  }
 }
 
 - (void)buildDispatcherWithSampleRate:(float)sr frameSize:(int)fs overlapRatio:(float)overlap opts:(NSDictionary*)opts {

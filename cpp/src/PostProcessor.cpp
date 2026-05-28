@@ -25,6 +25,7 @@ void PostProcessor::setConfig(Config cfg) {
     cfg.emaAlpha = std::clamp(cfg.emaAlpha, 0.01f, 1.0f);
     cfg.hysteresisFrames = std::max(cfg.hysteresisFrames, 1);
     cfg_ = cfg;
+    reset();
 }
 
 float PostProcessor::median5() const {
