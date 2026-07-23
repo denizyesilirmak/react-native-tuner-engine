@@ -1,10 +1,9 @@
 #include "NoteMapper.hpp"
 #include "OnsetDetector.hpp"
 #include "TunerEngine.hpp"
-#include "YinPitchDetector.hpp"
 #include "PyinPitchDetector.hpp"
 #include "CepstrumPitchDetector.hpp"
-#include "EnsembleSelector.hpp"
+#include "DetectorFusion.hpp"
 #include "BiquadHpf.hpp"
 #include "AudioFrameDispatcher.hpp"
 #include "InstrumentPresets.hpp"
@@ -39,6 +38,26 @@ static std::vector<float> generateSine(
 
 static std::vector<float> generateSilence(int frameSize) {
     return std::vector<float>(frameSize, 0.0f);
+}
+
+// Fundamental plus decaying harmonics — closer to a plucked string than a pure
+// sine, and rich enough for the cepstrum detector to find a quefrency peak.
+static std::vector<float> generateHarmonicTone(
+    float fundamental,
+    float sampleRate,
+    int sampleCount
+) {
+    std::vector<float> buffer(sampleCount, 0.0f);
+
+    for (int harmonic = 1; harmonic <= 5; ++harmonic) {
+        const float amplitude = 0.5f / static_cast<float>(harmonic);
+        for (int i = 0; i < sampleCount; ++i) {
+            buffer[i] += amplitude
+                       * std::sin(2.0f * PI * fundamental * harmonic * i / sampleRate);
+        }
+    }
+
+    return buffer;
 }
 
 static void testNoteMapper() {
@@ -77,22 +96,22 @@ static void testNoteMapper() {
     }
 }
 
-static void testYin(float inputFrequency) {
+static void testPyin(float inputFrequency) {
     constexpr float sampleRate = 48000.0f;
     constexpr int frameSize = 4096;
 
     auto buffer = generateSine(inputFrequency, sampleRate, frameSize);
 
-    YinPitchDetector detector(sampleRate, frameSize);
-    auto result = detector.detect(buffer.data(), static_cast<int>(buffer.size()));
+    PyinPitchDetector detector(sampleRate, frameSize);
+    auto result = detector.detect(buffer.data(), static_cast<int>(buffer.size()), sampleRate);
 
     std::cout
-        << "yin input: " << inputFrequency
+        << "pyin input: " << inputFrequency
         << " detected: " << result.frequency
         << " confidence: " << result.confidence
         << std::endl;
 
-    assert(result.hasPitch);
+    assert(result.voiced);
     assertNear(result.frequency, inputFrequency, 0.5f);
     assert(result.confidence > 0.80f);
 }
@@ -284,7 +303,7 @@ static void testInstrumentPreset() {
     assert(result.noteName == "G");
 }
 
-// --- M3: per-detector and ensemble tests ---
+// --- M3: per-detector and fusion tests ---
 
 static void testDetectorOnSine(float freq, const std::string& label) {
     constexpr float sr = 48000.0f;
@@ -294,36 +313,120 @@ static void testDetectorOnSine(float freq, const std::string& label) {
     BiquadHpf hpf(sr, 70.0f);
     hpf.process(buf.data(), n);
 
-    YinPitchDetector  yin(sr, n);
     PyinPitchDetector pyin(sr, n);
+    auto result = pyin.detect(buf.data(), n, sr);
 
-    auto ry  = yin.detect(buf.data(), n, sr);
-    auto rpy = pyin.detect(buf.data(), n, sr);
+    std::cout << "detector " << label << " @ " << freq << " Hz:"
+              << " pyin freq=" << result.frequency
+              << " conf=" << result.confidence << "\n";
 
-    std::cout << "detector " << label << " @ " << freq << " Hz:\n"
-              << "  YIN  freq=" << ry.frequency  << " conf=" << ry.confidence  << "\n"
-              << "  PYIN freq=" << rpy.frequency << " conf=" << rpy.confidence << "\n";
-
-    assert(ry.voiced);
-    assertNear(ry.frequency, freq, freq * 0.01f);  // within 1%
-
-    assert(rpy.voiced);
-    assertNear(rpy.frequency, freq, freq * 0.01f); // PYIN must agree with YIN
+    assert(result.voiced);
+    assertNear(result.frequency, freq, freq * 0.01f); // within 1%
 }
 
-static void testEnsembleAgreementBonus() {
-    // When YIN and PYIN agree, the ensemble should produce confidence > either detector alone.
-    constexpr float sr  = 48000.0f;
-    constexpr int   n   = 4096;
-    constexpr float f0  = 196.0f; // G3
+static void testCepstrumOnHarmonicTone() {
+    // The cepstrum detector needs harmonics to find a quefrency peak;
+    // a plucked-string-like tone is its home turf.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+    constexpr float f0 = 196.0f; // G3
 
-    auto buf = generateSine(f0, sr, n * 6); // 6 continuous frames for HPF warmup
+    auto buf = generateHarmonicTone(f0, sr, n);
 
-    std::vector<std::unique_ptr<IPitchDetector>> detectors;
-    detectors.push_back(std::make_unique<YinPitchDetector>(sr, n));
-    detectors.push_back(std::make_unique<PyinPitchDetector>(sr, n));
-    detectors.push_back(std::make_unique<CepstrumPitchDetector>(sr, n));
-    EnsembleSelector ensemble(std::move(detectors));
+    CepstrumPitchDetector cepstrum(sr, n);
+    auto result = cepstrum.detect(buf.data(), n, sr);
+
+    std::cout << "cepstrum harmonic G3: freq=" << result.frequency
+              << " conf=" << result.confidence << "\n";
+
+    assert(result.voiced);
+    // The cepstrum is the coarse corroborator — 3% is enough to land well
+    // inside the fusion's one-semitone (~6%) agreement window.
+    assertNear(result.frequency, f0, f0 * 0.03f);
+}
+
+// Fixed-output detector for exercising DetectorFusion's decision logic in isolation.
+struct StubDetector : IPitchDetector {
+    DetectorResult fixedResult;
+    explicit StubDetector(DetectorResult result) : fixedResult(result) {}
+    DetectorResult detect(const float*, int, float) override { return fixedResult; }
+    void setFrequencyRange(float, float) override {}
+};
+
+static void testFusionDecisions() {
+    const float dummyFrame[8] = {};
+
+    // Agreement: report the primary's precise frequency, combine confidences
+    // as independent evidence: 1 - (1-0.8)(1-0.5) = 0.9.
+    {
+        DetectorFusion fusion(
+            std::make_unique<StubDetector>(DetectorResult{true, 440.0f, 0.8f}),
+            std::make_unique<StubDetector>(DetectorResult{true, 442.0f, 0.5f}));
+        auto r = fusion.detect(dummyFrame, 8, 48000.0f);
+        assert(r.voiced);
+        assert(r.frequency == 440.0f); // exactly the primary's, never averaged
+        assertNear(r.confidence, 0.9f, 0.001f);
+    }
+
+    // Clash (an octave apart): the primary's frequency survives — the coarse
+    // corroborator never overrides it — but its conviction dampens the
+    // confidence: 0.9 * (1 - 0.4 * 0.3) = 0.792.
+    {
+        DetectorFusion fusion(
+            std::make_unique<StubDetector>(DetectorResult{true, 220.0f, 0.9f}),
+            std::make_unique<StubDetector>(DetectorResult{true, 440.0f, 0.3f}));
+        auto r = fusion.detect(dummyFrame, 8, 48000.0f);
+        assert(r.voiced);
+        assert(r.frequency == 220.0f);
+        assertNear(r.confidence, 0.792f, 0.001f);
+    }
+
+    // Solo primary: mild dampening (0.8 * 0.9 = 0.72).
+    {
+        DetectorFusion fusion(
+            std::make_unique<StubDetector>(DetectorResult{true, 330.0f, 0.8f}),
+            std::make_unique<StubDetector>(DetectorResult{}));
+        auto r = fusion.detect(dummyFrame, 8, 48000.0f);
+        assert(r.voiced);
+        assert(r.frequency == 330.0f);
+        assertNear(r.confidence, 0.72f, 0.001f);
+    }
+
+    // Solo corroborator: stronger dampening (0.8 * 0.7 = 0.56).
+    {
+        DetectorFusion fusion(
+            std::make_unique<StubDetector>(DetectorResult{}),
+            std::make_unique<StubDetector>(DetectorResult{true, 330.0f, 0.8f}));
+        auto r = fusion.detect(dummyFrame, 8, 48000.0f);
+        assert(r.voiced);
+        assert(r.frequency == 330.0f);
+        assertNear(r.confidence, 0.56f, 0.001f);
+    }
+
+    // Neither voiced → unvoiced.
+    {
+        DetectorFusion fusion(
+            std::make_unique<StubDetector>(DetectorResult{}),
+            std::make_unique<StubDetector>(DetectorResult{}));
+        auto r = fusion.detect(dummyFrame, 8, 48000.0f);
+        assert(!r.voiced);
+    }
+
+    std::cout << "fusion decisions: all correct\n";
+}
+
+static void testFusionAgreementOnHarmonicTone() {
+    // On a harmonic-rich tone both detectors fire and agree, so the fused
+    // confidence must exceed what either detector reports alone.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+    constexpr float f0 = 196.0f; // G3
+
+    auto buf = generateHarmonicTone(f0, sr, n * 6); // continuous for HPF warmup
+
+    DetectorFusion fusion(
+        std::make_unique<PyinPitchDetector>(sr, n),
+        std::make_unique<CepstrumPitchDetector>(sr, n));
 
     BiquadHpf hpf(sr, 70.0f);
 
@@ -331,21 +434,21 @@ static void testEnsembleAgreementBonus() {
     for (int f = 0; f < 6; ++f) {
         std::vector<float> frame(buf.begin() + f * n, buf.begin() + (f + 1) * n);
         hpf.process(frame.data(), n);
-        result = ensemble.detect(frame.data(), n, sr);
+        result = fusion.detect(frame.data(), n, sr);
     }
 
-    std::cout << "ensemble G3: voiced=" << result.voiced
+    std::cout << "fusion harmonic G3: voiced=" << result.voiced
               << " freq=" << result.frequency
               << " conf=" << result.confidence << "\n";
 
     assert(result.voiced);
     assertNear(result.frequency, f0, f0 * 0.01f);
-    assert(result.confidence > 0.85f); // agreement bonus applied
+    assert(result.confidence > 0.85f); // corroboration raised the confidence
 }
 
-static void testEnsembleOctaveSafety() {
+static void testEngineOctaveSafety() {
     // D3 (146.83 Hz): tau0 and 2*tau0 both fit in the search range.
-    // The ensemble must return the fundamental, not the sub-octave.
+    // The engine must return the fundamental, not the sub-octave.
     constexpr float sr = 48000.0f;
     constexpr int   n  = 4096;
 
@@ -357,7 +460,7 @@ static void testEnsembleOctaveSafety() {
         result = engine.process(buf.data() + f * n, n);
     }
 
-    std::cout << "ensemble octave safety D3: "
+    std::cout << "engine octave safety D3: "
               << result.noteName << result.octave
               << " freq=" << result.frequency << "\n";
 
@@ -572,12 +675,12 @@ static void testSetOverlapRatio() {
 int main() {
     testNoteMapper();
 
-    testYin(82.41f);
-    testYin(110.0f);
-    testYin(146.83f);
-    testYin(196.0f);
-    testYin(246.94f);
-    testYin(329.63f);
+    testPyin(82.41f);
+    testPyin(110.0f);
+    testPyin(146.83f);
+    testPyin(196.0f);
+    testPyin(246.94f);
+    testPyin(329.63f);
 
     testTunerEngine(82.41f, "E", 2);
     testTunerEngine(110.0f, "A", 2);
@@ -589,15 +692,17 @@ int main() {
     testTunerEngineSilence();
     testTunerEngineQuietSignal();
 
-    // M3 per-detector and ensemble tests
+    // M3 per-detector and fusion tests
     testDetectorOnSine(82.41f,  "E2");
     testDetectorOnSine(110.0f,  "A2");
     testDetectorOnSine(146.83f, "D3");
     testDetectorOnSine(196.0f,  "G3");
     testDetectorOnSine(329.63f, "E4");
     testDetectorOnSine(440.0f,  "A4");
-    testEnsembleAgreementBonus();
-    testEnsembleOctaveSafety();
+    testCepstrumOnHarmonicTone();
+    testFusionDecisions();
+    testFusionAgreementOnHarmonicTone();
+    testEngineOctaveSafety();
 
     // M2 DSP hardening tests
     testPipelineCleanSine(82.41f,  "E", 2);
