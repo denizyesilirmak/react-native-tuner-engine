@@ -3,132 +3,176 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+// Number of discrete levels the Beta threshold prior is sampled at.
+constexpr int kThresholdCount = 100;
+
+// Beta(2, 18) — mean 0.1, the threshold prior used in the pYIN paper.
+constexpr float kBetaAlpha = 2.0f;
+constexpr float kBetaBeta  = 18.0f;
+
+// When no minimum clears a threshold, the deepest minimum still receives this
+// fraction of that threshold's prior mass (the paper's "no candidate" fallback).
+constexpr float kNoCandidateFallbackWeight = 0.01f;
+
+// Candidates within this distance of the previous frame's pitch get a selection
+// bonus — a lightweight stand-in for the paper's HMM tracking stage.
+constexpr float kContinuitySemitones = 0.75f;
+constexpr float kContinuityBonus     = 1.2f;
+
+} // namespace
+
 PyinPitchDetector::PyinPitchDetector(float sampleRate, int frameSize)
     : sampleRate_(sampleRate)
     , frameSize_(frameSize)
 {
-    diff_.resize(static_cast<size_t>(frameSize_ / 2));
-    cmnd_.resize(static_cast<size_t>(frameSize_ / 2));
-    candidates_.reserve(32); // typical number of CMND minima
+    squaredDifference_.resize(static_cast<size_t>(frameSize_ / 2));
+    normalizedDifference_.resize(static_cast<size_t>(frameSize_ / 2));
+    candidates_.reserve(32); // typical upper bound on CMND minima per frame
+
+    // Discretize the Beta(2, 18) prior once; detect() only does lookups.
+    thresholdLevels_.resize(kThresholdCount);
+    thresholdPriors_.resize(kThresholdCount);
+    float priorSum = 0.0f;
+    for (int i = 0; i < kThresholdCount; ++i) {
+        const float threshold = static_cast<float>(i + 1) / static_cast<float>(kThresholdCount);
+        thresholdLevels_[i] = threshold;
+        thresholdPriors_[i] = std::pow(threshold, kBetaAlpha - 1.0f)
+                            * std::pow(1.0f - threshold, kBetaBeta - 1.0f);
+        priorSum += thresholdPriors_[i];
+    }
+    for (float& prior : thresholdPriors_) prior /= priorSum;
 }
 
 void PyinPitchDetector::setFrequencyRange(float minHz, float maxHz) {
-    minHz_ = minHz;
-    maxHz_ = maxHz;
+    minFrequencyHz_ = minHz;
+    maxFrequencyHz_ = maxHz;
 }
 
-void PyinPitchDetector::setThreshold(float threshold) {
-    threshold_ = threshold;
+void PyinPitchDetector::reset() {
+    previousPitchHz_ = 0.0f;
 }
 
-DetectorResult PyinPitchDetector::detect(const float* frame, int n, float sampleRate) {
-    const float sr = sampleRate > 0.0f ? sampleRate : sampleRate_;
+DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, float sampleRate) {
+    const float rate = sampleRate > 0.0f ? sampleRate : sampleRate_;
 
-    if (!frame || n < frameSize_) return DetectorResult{};
+    if (!frame || frameLength < frameSize_) return DetectorResult{};
 
-    const int tauMin = std::max(2, static_cast<int>(sr / maxHz_));
-    const int tauMax = std::min(
-        frameSize_ / 2 - 1,
-        static_cast<int>(sr / minHz_)
+    const int minLag = std::max(2, static_cast<int>(rate / maxFrequencyHz_));
+    const int maxLag = std::min(
+        frameSize_ / 2 - 2, // leave room for the lag+1 neighbour reads below
+        static_cast<int>(rate / minFrequencyHz_)
     );
+    if (minLag >= maxLag) return DetectorResult{};
 
-    if (tauMin >= tauMax) return DetectorResult{};
-
-    // Squared difference function (YIN step 2)
-    std::fill(diff_.begin(), diff_.end(), 0.0f);
-    for (int tau = 1; tau <= tauMax; ++tau) {
+    // YIN step 2: squared difference between the frame and its lagged copy.
+    // Computed one lag past maxLag so the minima scan can look at lag+1.
+    const int lagLimit = maxLag + 1;
+    for (int lag = 1; lag <= lagLimit; ++lag) {
         float sum = 0.0f;
-        for (int i = 0; i < frameSize_ - tau; ++i) {
-            const float d = frame[i] - frame[i + tau];
-            sum += d * d;
+        for (int i = 0; i < frameSize_ - lag; ++i) {
+            const float delta = frame[i] - frame[i + lag];
+            sum += delta * delta;
         }
-        diff_[tau] = sum;
+        squaredDifference_[lag] = sum;
     }
 
-    // Cumulative mean normalised difference (CMND, YIN step 3)
-    cmnd_[0] = 1.0f;
-    float runningSum = 0.0f;
-    for (int tau = 1; tau <= tauMax; ++tau) {
-        runningSum += diff_[tau];
-        cmnd_[tau] = (runningSum <= 0.0f)
-                     ? 1.0f
-                     : diff_[tau] * static_cast<float>(tau) / runningSum;
+    // YIN step 3: cumulative-mean-normalized difference (CMND).
+    normalizedDifference_[0] = 1.0f;
+    float differenceSum = 0.0f;
+    for (int lag = 1; lag <= lagLimit; ++lag) {
+        differenceSum += squaredDifference_[lag];
+        normalizedDifference_[lag] = (differenceSum <= 0.0f)
+            ? 1.0f
+            : squaredDifference_[lag] * static_cast<float>(lag) / differenceSum;
     }
 
-    // Collect all local minima of CMND below threshold — this is the PYIN divergence point.
-    // YIN stops at the first; PYIN considers all.
+    // Every CMND local minimum in the lag range is a pitch candidate.
     candidates_.clear();
-
-    auto tryAdd = [&](int tau) {
-        if (tau < tauMin || tau > tauMax) return;
-        if (cmnd_[tau] < threshold_) {
-            candidates_.push_back({tau, 1.0f - cmnd_[tau] / threshold_});
-        }
-    };
-
-    // Interior local minima
-    for (int tau = tauMin + 1; tau < tauMax; ++tau) {
-        if (cmnd_[tau] < cmnd_[tau - 1] && cmnd_[tau] < cmnd_[tau + 1]) {
-            tryAdd(tau);
+    for (int lag = minLag; lag <= maxLag; ++lag) {
+        const float left  = normalizedDifference_[lag - 1];
+        const float here  = normalizedDifference_[lag];
+        const float right = normalizedDifference_[lag + 1];
+        if (here < left && here <= right) {
+            candidates_.push_back({lag, here, 0.0f});
         }
     }
-    // Boundary checks
-    if (cmnd_[tauMin] < cmnd_[tauMin + 1]) tryAdd(tauMin);
-    if (cmnd_[tauMax] < cmnd_[tauMax - 1]) tryAdd(tauMax);
-
     if (candidates_.empty()) return DetectorResult{};
 
-    // The CMND formula makes later (longer-period) minima numerically smaller than
-    // earlier ones at sub-multiples of the same fundamental period. Without pruning,
-    // a pure sine would always produce candidates at tau0, 2*tau0, 3*tau0 … with the
-    // highest probability at the LONGEST alias — the wrong (sub-octave) answer.
-    //
-    // Prune: for any candidate whose tau is within 2% of an integer multiple (≥2×) of
-    // a shorter-period candidate, zero its probability. Candidates are already in
-    // ascending tau order, so a single forward pass suffices.
-    for (int i = 0; i < static_cast<int>(candidates_.size()); ++i) {
-        if (candidates_[i].prob == 0.0f) continue;
-        for (int j = i + 1; j < static_cast<int>(candidates_.size()); ++j) {
-            const float ratio   = static_cast<float>(candidates_[j].tau)
-                                  / static_cast<float>(candidates_[i].tau);
-            const float nearest = std::round(ratio);
-            if (nearest >= 2.0f && std::fabs(ratio - nearest) / nearest < 0.02f) {
-                candidates_[j].prob = 0.0f;
+    PitchCandidate* deepest = &candidates_[0];
+    for (auto& candidate : candidates_) {
+        if (candidate.cmndDepth < deepest->cmndDepth) deepest = &candidate;
+    }
+
+    // pYIN core: accumulate probability mass over Beta-distributed thresholds.
+    // For each threshold, YIN's rule picks the first (lowest-lag) minimum below
+    // it — so each candidate's mass is the prior probability of the thresholds
+    // at which YIN would have chosen it.
+    for (int i = 0; i < kThresholdCount; ++i) {
+        const float threshold = thresholdLevels_[i];
+        PitchCandidate* firstBelowThreshold = nullptr;
+        for (auto& candidate : candidates_) {
+            if (candidate.cmndDepth < threshold) {
+                firstBelowThreshold = &candidate;
+                break;
             }
+        }
+        if (firstBelowThreshold) {
+            firstBelowThreshold->probability += thresholdPriors_[i];
+        } else {
+            deepest->probability += thresholdPriors_[i] * kNoCandidateFallbackWeight;
         }
     }
 
-    // Sum surviving probabilities for voiced confidence
-    float totalProb = 0.0f;
-    for (const auto& c : candidates_) totalProb += c.prob;
-
-    // Pick the candidate with the highest (surviving) probability.
-    // Strict '>' keeps the first (lowest-tau, highest-frequency) on exact ties.
-    const Candidate* winner = nullptr;
-    for (const auto& c : candidates_) {
-        if (!winner || c.prob > winner->prob) winner = &c;
+    // Winner = highest mass, with a small bonus for staying near the previous
+    // pitch. The bonus only affects the ranking; reported confidence uses the
+    // unbiased mass so a sustained note cannot inflate its own confidence.
+    const PitchCandidate* winner = nullptr;
+    float bestScore = 0.0f;
+    for (const auto& candidate : candidates_) {
+        if (candidate.probability <= 0.0f) continue;
+        float score = candidate.probability;
+        if (previousPitchHz_ > 0.0f) {
+            const float candidateHz = rate / static_cast<float>(candidate.lag);
+            const float semitonesAway =
+                std::fabs(12.0f * std::log2(candidateHz / previousPitchHz_));
+            if (semitonesAway <= kContinuitySemitones) score *= kContinuityBonus;
+        }
+        if (!winner || score > bestScore) {
+            winner = &candidate;
+            bestScore = score;
+        }
     }
-    if (!winner || winner->prob == 0.0f) return DetectorResult{};
+    if (!winner) return DetectorResult{};
 
-    const float betterTau = parabolicInterpolation(winner->tau);
-    if (betterTau <= 0.0f) return DetectorResult{};
+    const float refinedLag = refineLagByParabola(winner->lag);
+    if (refinedLag <= 0.0f) return DetectorResult{};
+    const float pitchHz = rate / refinedLag;
 
-    // Confidence: voiced probability × how much the winner dominates
-    const float voicedProb  = std::min(1.0f, totalProb);
-    const float winnerShare = (totalProb > 0.0f) ? winner->prob / totalProb : 0.0f;
-    const float confidence  = voicedProb * (0.5f + 0.5f * winnerShare);
+    // Confidence = periodicity strength × share of the pYIN mass the winner
+    // captured. Both factors are in [0, 1]: a clean periodic frame with an
+    // unambiguous winner scores near 1, an ambiguous or aperiodic frame scores
+    // low. The pYIN mass decides WHICH candidate wins; the CMND depth keeps the
+    // scale calibrated to the pipeline's confidence threshold.
+    float totalMass = 0.0f;
+    for (const auto& candidate : candidates_) totalMass += candidate.probability;
+    const float winnerMassShare = totalMass > 0.0f ? winner->probability / totalMass : 0.0f;
+    const float periodicity     = std::max(0.0f, 1.0f - winner->cmndDepth);
+    const float confidence      = periodicity * winnerMassShare;
 
-    return DetectorResult{true, sr / betterTau, confidence};
+    previousPitchHz_ = pitchHz;
+    return DetectorResult{true, pitchHz, confidence};
 }
 
-float PyinPitchDetector::parabolicInterpolation(int tau) const {
-    if (tau <= 0 || tau >= static_cast<int>(cmnd_.size()) - 1) {
-        return static_cast<float>(tau);
+float PyinPitchDetector::refineLagByParabola(int lag) const {
+    if (lag <= 0 || lag >= static_cast<int>(normalizedDifference_.size()) - 1) {
+        return static_cast<float>(lag);
     }
-    const float L = cmnd_[tau - 1];
-    const float C = cmnd_[tau];
-    const float R = cmnd_[tau + 1];
-    const float d = L - 2.0f * C + R;
-    if (std::fabs(d) < 1e-6f) return static_cast<float>(tau);
-    return tau + 0.5f * (L - R) / d;
+    const float left   = normalizedDifference_[lag - 1];
+    const float center = normalizedDifference_[lag];
+    const float right  = normalizedDifference_[lag + 1];
+    const float curvature = left - 2.0f * center + right;
+    if (std::fabs(curvature) < 1e-6f) return static_cast<float>(lag);
+    return static_cast<float>(lag) + 0.5f * (left - right) / curvature;
 }

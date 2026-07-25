@@ -15,15 +15,15 @@ public:
 
     void reset() override {}
     void setFrequencyRange(float minHz, float maxHz) override;
-    void setThreshold(float threshold) override;
+    void setProminenceThreshold(float threshold);
 
 private:
     float sampleRate_;
     int   frameSize_;
 
-    float minHz_     = 60.0f;
-    float maxHz_     = 1200.0f;
-    float threshold_ = 0.10f; // minimum peak prominence to be considered voiced
+    float minHz_               = 60.0f;
+    float maxHz_               = 1200.0f;
+    float prominenceThreshold_ = 0.10f; // minimum peak prominence to be considered voiced
 
     std::vector<float>               hann_;
     std::vector<std::complex<float>> fftBuf_;

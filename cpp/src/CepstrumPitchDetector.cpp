@@ -24,8 +24,8 @@ void CepstrumPitchDetector::setFrequencyRange(float minHz, float maxHz) {
     maxHz_ = maxHz;
 }
 
-void CepstrumPitchDetector::setThreshold(float threshold) {
-    threshold_ = threshold;
+void CepstrumPitchDetector::setProminenceThreshold(float threshold) {
+    prominenceThreshold_ = threshold;
 }
 
 DetectorResult CepstrumPitchDetector::detect(const float* frame, int n, float sampleRate) {
@@ -63,17 +63,23 @@ DetectorResult CepstrumPitchDetector::detect(const float* frame, int n, float sa
     const int tauMax = std::min(frameSize_ / 2 - 1, static_cast<int>(sr / minHz_));
     if (tauMin >= tauMax) return DetectorResult{};
 
-    // Find the quefrency peak
-    float maxVal = -1e30f;
+    // Find the tallest strict local maximum in the quefrency range. The global
+    // maximum often sits on the range boundary where the low-quefrency envelope
+    // tail is still decaying — that is not a periodicity peak, and accepting it
+    // produced confident junk detections pinned to the frequency-range edge.
+    float maxVal  = -1e30f;
     int   bestTau = -1;
-    for (int q = tauMin; q <= tauMax; ++q) {
+    for (int q = tauMin + 1; q < tauMax; ++q) {
         const float v = fftBuf_[q].real();
-        if (v > maxVal) { maxVal = v; bestTau = q; }
+        if (v > fftBuf_[q - 1].real() && v >= fftBuf_[q + 1].real() && v > maxVal) {
+            maxVal  = v;
+            bestTau = q;
+        }
     }
     if (bestTau < 0) return DetectorResult{};
 
     const float prominence = peakProminence(tauMin, tauMax, bestTau);
-    if (prominence < threshold_) return DetectorResult{};
+    if (prominence < prominenceThreshold_) return DetectorResult{};
 
     // Sub-sample refinement via parabolic interpolation
     float peakTau = static_cast<float>(bestTau);
@@ -94,23 +100,29 @@ DetectorResult CepstrumPitchDetector::detect(const float* frame, int n, float sa
 float CepstrumPitchDetector::peakProminence(int tauMin, int tauMax, int peakTau) const {
     const float peak = fftBuf_[peakTau].real();
 
-    // RMS and mean of the quefrency range (excluding the peak itself)
+    // Mean of the quefrency range — the baseline the peaks rise above.
     float sum = 0.0f;
-    float sumSq = 0.0f;
     const int count = tauMax - tauMin + 1;
     for (int q = tauMin; q <= tauMax; ++q) {
-        const float v = fftBuf_[q].real();
-        sum   += v;
-        sumSq += v * v;
+        sum += fftBuf_[q].real();
     }
-    const float mean = sum   / static_cast<float>(count);
-    const float rms  = std::sqrt(sumSq / static_cast<float>(count));
+    const float mean = sum / static_cast<float>(count);
 
-    // Confidence: how much the peak exceeds the RMS level.
-    // A cepstrum with no clear periodicity (pure sine) has peak ≈ RMS → conf ≈ 0.
-    // A strong harmonic signal has peak >> RMS → conf → 1.
-    if (rms < kEps) return 0.0f;
-    const float snr = (peak - mean) / rms;
-    // Map snr range [0, 5] → [0, 1]; cap both sides
-    return std::max(0.0f, std::min(1.0f, snr / 5.0f));
+    const float peakHeight = peak - mean;
+    if (peakHeight < kEps) return 0.0f;
+
+    // Highest rival: the tallest value outside the peak's own ±10% neighbourhood.
+    // A truly harmonic signal has one dominant quefrency peak; a pure sine or
+    // noise produces several comparable peaks, so the rival nearly matches the
+    // peak and the prominence collapses. Scale-invariant by construction —
+    // no fixed SNR scale to saturate.
+    const int exclusionRadius = std::max(1, peakTau / 10);
+    float rival = -1e30f;
+    for (int q = tauMin; q <= tauMax; ++q) {
+        if (std::abs(q - peakTau) <= exclusionRadius) continue;
+        rival = std::max(rival, fftBuf_[q].real());
+    }
+    const float rivalHeight = std::max(0.0f, rival - mean);
+
+    return std::max(0.0f, std::min(1.0f, 1.0f - rivalHeight / peakHeight));
 }
