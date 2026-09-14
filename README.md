@@ -11,7 +11,7 @@ Requires React Native **0.75 or later** with the New Architecture enabled.
 
 ## How it works
 
-Audio is captured through platform-native APIs (AVAudioEngine on iOS, Oboe on Android) and fed into a lock-free SPSC ring buffer. A C++ worker thread drains the buffer in fixed-size frames, runs the signal through a preprocessing pipeline, then through an ensemble of three pitch detectors (YIN, PYIN, cepstrum). The ensemble votes for the best estimate and fires an `onPitch` event on the JS thread.
+Audio is captured through platform-native APIs (AVAudioEngine on iOS, Oboe on Android) and fed into a lock-free SPSC ring buffer. A C++ worker thread drains the buffer in fixed-size frames, runs the signal through a preprocessing pipeline, then through two complementary pitch detectors: probabilistic YIN (pYIN) as the precise primary estimator and a cepstrum detector as an independent corroborator. Their fused result fires an `onPitch` event on the JS thread.
 
 The audio callback allocates nothing at runtime — all working buffers are pre-allocated during initialization.
 
@@ -196,10 +196,9 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 |---|---|---|
 | High-pass filter | `BiquadHpf` | Direct-Form II Transposed, 70 Hz cutoff (configurable), Q 0.707 |
 | Windowing | `Window` | Hann window, precomputed coefficients |
-| Pitch detection | `EnsembleSelector` | Runs YIN, PYIN, and cepstrum; votes by agreement within 1 semitone |
-| — detector 1 | `YinPitchDetector` | YIN with parabolic interpolation |
-| — detector 2 | `PyinPitchDetector` | Probabilistic YIN; prunes harmonic aliases |
-| — detector 3 | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; SNR-based confidence |
+| Pitch detection | `DetectorFusion` | Fuses a precise primary detector with a coarse corroborator (agree/clash/solo rules within 1 semitone) |
+| — primary | `PyinPitchDetector` | Probabilistic YIN (Beta-distributed threshold prior, per-candidate probability mass) |
+| — corroborator | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; peak-vs-rival prominence confidence |
 | Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
 | SNR estimation | `SnrEstimator` | Signal RMS vs. noise-floor EMA |
 | Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing (configurable), note-transition hysteresis (configurable) |
