@@ -5,29 +5,38 @@
 
 static constexpr float kMinLinear = 1e-7f; // -140 dBFS floor
 
+// SNR at which the weight starts above zero, and where it reaches full trust.
+static constexpr float kWeightZeroSnrDb = 6.0f;
+static constexpr float kWeightFullSnrDb = 18.0f;
+
 SnrEstimator::SnrEstimator(float floorInitDb)
     : noiseFloorLinear_(std::pow(10.0f, floorInitDb / 20.0f)) {}
 
-float SnrEstimator::update(float rmsLinear) {
+float SnrEstimator::update(float rmsLinear, bool voiced) {
     rmsLinear = std::max(rmsLinear, kMinLinear);
 
     if (rmsLinear < noiseFloorLinear_) {
-        // Signal dropped below floor — pull floor down quickly to track silence
-        noiseFloorLinear_ = kAttackAlpha * rmsLinear + (1.0f - kAttackAlpha) * noiseFloorLinear_;
+        // Quieter than the floor — follow it down quickly to track silence.
+        noiseFloorLinear_ = kFallAlpha * rmsLinear + (1.0f - kFallAlpha) * noiseFloorLinear_;
+    } else {
+        // Louder — climb toward it, but never past it. Unpitched frames are
+        // most likely noise; pitched ones are the note we're measuring.
+        const float riseDb = voiced ? kRiseVoicedDb : kRiseUnvoicedDb;
+        noiseFloorLinear_ = std::min(rmsLinear, noiseFloorLinear_ * std::pow(10.0f, riseDb / 20.0f));
     }
-    // Floor never rises during active signal — prevents SNR from collapsing on sustained notes
 
     noiseFloorLinear_ = std::max(noiseFloorLinear_, kMinLinear);
     return 20.0f * std::log10(rmsLinear / noiseFloorLinear_);
 }
 
 float SnrEstimator::snrToWeight(float snrDb) {
-    // Sigmoid-like mapping: 0 dB SNR → ~0.0 weight, 20 dB → ~1.0 weight
-    if (snrDb <= 0.0f)  return 0.0f;
-    if (snrDb >= 30.0f) return 1.0f;
-    return snrDb / 30.0f;
+    // Linear ramp: 6 dB SNR → 0, 18 dB → 1. A pitch 18 dB over the room is
+    // clean enough to trust fully; the detectors handle the rest.
+    if (snrDb <= kWeightZeroSnrDb) return 0.0f;
+    if (snrDb >= kWeightFullSnrDb) return 1.0f;
+    return (snrDb - kWeightZeroSnrDb) / (kWeightFullSnrDb - kWeightZeroSnrDb);
 }
 
 void SnrEstimator::reset() {
-    noiseFloorLinear_ = std::pow(10.0f, -70.0f / 20.0f);
+    noiseFloorLinear_ = std::pow(10.0f, kFloorInitDb / 20.0f);
 }

@@ -200,7 +200,7 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 | — primary | `PyinPitchDetector` | Probabilistic YIN (Beta-distributed threshold prior, per-candidate probability mass) |
 | — corroborator | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; peak-vs-rival prominence confidence |
 | Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
-| SNR estimation | `SnrEstimator` | Signal RMS vs. noise-floor EMA |
+| SNR estimation | `SnrEstimator` | Signal RMS vs. a noise floor learned from every frame (fast fall, slow rise); full confidence weight from 18 dB SNR |
 | Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing (configurable), note-transition hysteresis (configurable) |
 | Dispatch | `AudioFrameDispatcher` | SPSC lock-free queue, dedicated worker thread |
 

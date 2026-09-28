@@ -7,6 +7,7 @@
 #include "BiquadHpf.hpp"
 #include "AudioFrameDispatcher.hpp"
 #include "InstrumentPresets.hpp"
+#include "SnrEstimator.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -672,6 +673,131 @@ static void testSetOverlapRatio() {
     std::cout << "setOverlapRatio: all correct\n";
 }
 
+// --- SNR weighting ---
+
+static float dbToLinear(float db) {
+    return std::pow(10.0f, db / 20.0f);
+}
+
+static float rmsOf(const float* data, int n) {
+    float sum = 0.0f;
+    for (int i = 0; i < n; ++i) sum += data[i] * data[i];
+    return std::sqrt(sum / static_cast<float>(n));
+}
+
+// White noise at the given RMS level (dBFS).
+static std::vector<float> generateNoise(int sampleCount, float rmsDb, uint32_t seed = 0xC0FFEEu) {
+    std::vector<float> buffer(sampleCount);
+    for (int i = 0; i < sampleCount; ++i) {
+        seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+        buffer[i] = static_cast<float>(static_cast<int32_t>(seed)) / 2147483648.0f;
+    }
+    const float scale = dbToLinear(rmsDb) / rmsOf(buffer.data(), sampleCount);
+    for (auto& s : buffer) s *= scale;
+    return buffer;
+}
+
+static void testSnrEstimator() {
+    // Weight ramp: nothing below 6 dB, full trust from 18 dB.
+    assertNear(SnrEstimator::snrToWeight(0.0f),  0.0f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(6.0f),  0.0f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(12.0f), 0.5f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(18.0f), 1.0f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(40.0f), 1.0f, 1e-6f);
+
+    // A noisy room: unpitched frames at -45 dBFS must raise the floor there,
+    // so the same level no longer counts as signal.
+    SnrEstimator noisy;
+    for (int i = 0; i < 200; ++i) noisy.update(dbToLinear(-45.0f), false);
+    const float roomSnr = noisy.update(dbToLinear(-45.0f), false);
+    assert(roomSnr < 1.0f);
+    const float noteSnr = noisy.update(dbToLinear(-25.0f), true);
+    assertNear(noteSnr, 20.0f, 1.0f);
+
+    // A quiet room: the floor follows the silence down quickly...
+    SnrEstimator quiet;
+    for (int i = 0; i < 30; ++i) quiet.update(dbToLinear(-85.0f), false);
+    const float silenceSnr = quiet.update(dbToLinear(-85.0f), false);
+    assert(silenceSnr < 1.0f);
+
+    // ...and a held note (~5 s of pitched frames) barely moves it.
+    float heldSnr = 0.0f;
+    for (int i = 0; i < 250; ++i) heldSnr = quiet.update(dbToLinear(-50.0f), true);
+
+    std::cout << "snr estimator: room=" << roomSnr
+              << " note=" << noteSnr
+              << " silence=" << silenceSnr
+              << " held=" << heldSnr << "\n";
+
+    assert(heldSnr > 25.0f);
+}
+
+
+static void testPipelineDistantGuitar() {
+    // A string plucked at arm's length reaches the phone mic around -50 dBFS
+    // (no AGC in measurement mode), just over the default -55 dB gate, in a
+    // quiet room at about -75 dBFS. It must still be tuned.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+    constexpr int   quietFrames = 20;
+    constexpr int   noteFrames  = 8;
+
+    auto noise = generateNoise(n * (quietFrames + noteFrames), -75.0f);
+    auto tone  = generateHarmonicTone(110.0f, sr, n * noteFrames); // A2
+    const float toneScale = dbToLinear(-50.0f) / rmsOf(tone.data(), static_cast<int>(tone.size()));
+
+    std::vector<float> input = noise;
+    for (size_t i = 0; i < tone.size(); ++i) {
+        input[quietFrames * n + i] += tone[i] * toneScale;
+    }
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    PitchResult result;
+    for (int f = 0; f < quietFrames + noteFrames; ++f) {
+        result = engine.process(input.data() + f * n, n);
+    }
+
+    std::cout << "distant guitar A2 @ -50 dBFS: hasPitch=" << result.hasPitch
+              << " note=" << result.noteName << result.octave
+              << " conf=" << result.confidence
+              << " rms=" << result.rmsDb << "\n";
+
+    assert(result.hasPitch);
+    assert(result.noteName == "A");
+    assert(result.octave == 2);
+}
+
+static void testPipelineRejectsToneBuriedInNoise() {
+    // Loud room noise that passes the gate: after the floor has learned it, a
+    // tone only a few dB above it must not be reported.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 4096;
+    constexpr int   noiseFrames = 150;
+    constexpr int   noteFrames  = 8;
+
+    auto input = generateNoise(n * (noiseFrames + noteFrames), -40.0f);
+    auto tone  = generateHarmonicTone(110.0f, sr, n * noteFrames);
+    const float toneScale = dbToLinear(-40.0f) / rmsOf(tone.data(), static_cast<int>(tone.size()));
+    for (size_t i = 0; i < tone.size(); ++i) {
+        input[noiseFrames * n + i] += tone[i] * toneScale;
+    }
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    int pitched = 0;
+    for (int f = 0; f < noiseFrames + noteFrames; ++f) {
+        auto r = engine.process(input.data() + f * n, n);
+        if (f >= noiseFrames && r.hasPitch) ++pitched;
+    }
+
+    std::cout << "tone buried in noise: pitched frames=" << pitched << "/" << noteFrames << "\n";
+
+    assert(pitched == 0);
+}
+
 int main() {
     testNoteMapper();
 
@@ -714,6 +840,11 @@ int main() {
     testPipelineHysteresis();
     testInstrumentPreset();
     testOnsetDetector();
+
+    // SNR weighting
+    testSnrEstimator();
+    testPipelineDistantGuitar();
+    testPipelineRejectsToneBuriedInNoise();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();

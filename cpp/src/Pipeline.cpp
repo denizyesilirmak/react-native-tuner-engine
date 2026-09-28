@@ -22,6 +22,8 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     const float rmsDb     = 20.0f * std::log10(std::max(rmsLinear, kMinLinear));
 
     if (rmsDb < noiseGateDb_) {
+        // Gated frames are the best view of the room's noise floor.
+        snr_.update(rmsLinear, false);
         PitchResult silent;
         silent.rmsDb = rmsDb;
         return silent;
@@ -42,7 +44,7 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     DetectorResult det = detector_->detect(workBuffer_.data(), frameSize_, sampleRate_);
 
     // --- SNR-weighted confidence ---
-    const float snrDb     = snr_.update(rmsLinear);
+    const float snrDb     = snr_.update(rmsLinear, det.voiced);
     const float snrWeight = SnrEstimator::snrToWeight(snrDb);
     const float weightedConf = det.confidence * snrWeight;
 
