@@ -42,6 +42,14 @@
     return NO;
   }
 
+  // iOS mutes haptics and system sounds while a record-capable session is
+  // active unless opted in, which silenced the host app's in-tune feedback.
+  [session setAllowHapticsAndSystemSoundsDuringRecording:YES error:&sessionError];
+  if (sessionError) {
+    NSLog(@"[IosAudioSource] setAllowHapticsAndSystemSoundsDuringRecording error (non-fatal): %@", sessionError.localizedDescription);
+    sessionError = nil;
+  }
+
   [session setMode:AVAudioSessionModeMeasurement error:&sessionError];
   if (sessionError) {
     NSLog(@"[IosAudioSource] setMode error (non-fatal): %@", sessionError.localizedDescription);
