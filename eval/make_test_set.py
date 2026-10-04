@@ -3,6 +3,7 @@
 
   make_test_set.py synth OUT_DIR   synthetic plucked strings + noise-only files
   make_test_set.py nsynth DIR      NSynth wavs, MIDI note taken from the file name
+  make_test_set.py wavebase DIR    cluesurf/wavebase guitar notes (string-N-Dx-as-Dx2.wav -> D#2)
   make_test_set.py own DIR         your recordings, note = file name before the first '_'
 
 Standard library only. Writes DIR/manifest.csv (`file,expected[,instrument]`).
@@ -262,6 +263,28 @@ def nsynth(directory):
     write_manifest(directory, rows)
 
 
+def wavebase(directory):
+    """cluesurf/wavebase guitar notes: ...-as-X<octave>.wav or ...-note-X<octave>-fret-NN-T.wav ('x' = sharp).
+
+    Files that are still Git LFS pointers (not downloaded) are skipped."""
+    rows = []
+    for root, _, files in os.walk(directory):
+        for fn in sorted(files):
+            m = (re.search(r"-as-([A-G])(x?)(\d)\.wav$", fn)
+                 or re.search(r"-note-([A-G])(x?)(\d)-fret-\d+-\d+\.wav$", fn))
+            if not m:
+                continue
+            path = os.path.join(root, fn)
+            with open(path, "rb") as f:
+                if f.read(4) != b"RIFF":  # Git LFS pointer, not downloaded
+                    continue
+            letter, sharp, octave = m.groups()
+            rel = os.path.relpath(path, directory)
+            rows.append((rel, letter + ("#" if sharp else "") + octave))
+    rows.sort()
+    write_manifest(directory, rows)
+
+
 def own(directory):
     rows = []
     for fn in sorted(os.listdir(directory)):
@@ -278,7 +301,7 @@ def own(directory):
 
 
 def main(argv):
-    modes = {"synth": synth, "nsynth": nsynth, "own": own}
+    modes = {"synth": synth, "nsynth": nsynth, "wavebase": wavebase, "own": own}
     if len(argv) != 3 or argv[1] not in modes:
         print(__doc__)
         return 2

@@ -10,6 +10,7 @@
 #include "SnrEstimator.hpp"
 
 #include <cassert>
+#include <cstdio>
 #include <cmath>
 #include <chrono>
 #include <iostream>
@@ -1041,6 +1042,30 @@ static void testNoteHoldReleases() {
     }
 }
 
+static void testPyinRealStringNoOctaveUp() {
+    // Real recorded A#3 (233 Hz) whose strong 2nd harmonic used to make pYIN
+    // report 469 Hz with confidence > 0.9. Fails with the octave-up repair removed.
+    constexpr float sr = 44100.0f;
+    constexpr int   n  = 2048;
+    constexpr int   frames = 3;
+
+    std::vector<float> data(static_cast<size_t>(n) * frames);
+    FILE* f = std::fopen(TUNER_TEST_DATA_DIR "/strat_Asharp3_frames.f32", "rb");
+    assert(f && "missing tests/data/strat_Asharp3_frames.f32");
+    const size_t got = std::fread(data.data(), sizeof(float), data.size(), f);
+    std::fclose(f);
+    assert(got == data.size());
+
+    for (int k = 0; k < frames; ++k) {
+        PyinPitchDetector pyin(sr, n);
+        auto r = pyin.detect(data.data() + static_cast<size_t>(k) * n, n, sr);
+        std::cout << "pyin real A#3 frame " << k << ": f=" << r.frequency
+                  << " conf=" << r.confidence << "\n";
+        assert(r.voiced);
+        assert(std::fabs(r.frequency - 233.08f) / 233.08f < 0.01f);
+    }
+}
+
 int main() {
     testNoteMapper();
 
@@ -1090,6 +1115,7 @@ int main() {
     testPipelineRejectsToneBuriedInNoise();
     testPipelineQuietTailStillTuned();
     testPyinMultiplesDoNotSplitConfidence();
+    testPyinRealStringNoOctaveUp();
     testNoteHoldKeepsDecayingNote();
     testNoteHoldDoesNotStartOrJump();
     testNoteHoldReleases();

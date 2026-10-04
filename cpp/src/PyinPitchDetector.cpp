@@ -25,6 +25,14 @@ constexpr float kContinuityBonus     = 1.2f;
 // fundamental (CMND depth units).
 constexpr float kSubharmonicDepthSlack = 0.1f;
 
+// Octave-up repair. A string with a strong 2nd harmonic dips at T/2 almost as
+// deep as at T, and the threshold prior then crowns T/2. When a multiple of the
+// winner is near-perfectly periodic and clearly deeper than the winner, that
+// multiple is the real period. Noisy frames never get this close to zero, so
+// noise cannot trigger it.
+constexpr float kNearPerfectDepth = 0.03f;
+constexpr float kRepairDepthMargin = 0.01f;
+
 // True when `lag` is (within 3 %) an integer multiple, 1..8, of `base`.
 bool isMultipleOf(int lag, int base) {
     const float ratio = static_cast<float>(lag) / static_cast<float>(base);
@@ -168,6 +176,19 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
         if (static_cast<float>(winner->lag) / static_cast<float>(candidate.lag) < 1.5f) continue;
         if (candidate.cmndDepth <= winner->cmndDepth + kSubharmonicDepthSlack
             && isMultipleOf(winner->lag, candidate.lag)) {
+            winner = &candidate;
+            break;
+        }
+    }
+
+    // ...and the reverse: the winner may be T/2 of a string whose real period T
+    // is much cleaner. The last word goes to the evidence, not to the prior.
+    for (const auto& candidate : candidates_) {
+        if (candidate.lag <= winner->lag) continue;
+        if (candidate.cmndDepth < kNearPerfectDepth
+            && candidate.cmndDepth + kRepairDepthMargin <= winner->cmndDepth
+            && static_cast<float>(candidate.lag) / static_cast<float>(winner->lag) >= 1.5f
+            && isMultipleOf(candidate.lag, winner->lag)) {
             winner = &candidate;
             break;
         }

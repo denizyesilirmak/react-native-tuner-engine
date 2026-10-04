@@ -23,8 +23,19 @@ for noise-only files.
 ```sh
 python3 eval/make_test_set.py synth  eval/data/synth   # synthetic strings + noise
 python3 eval/make_test_set.py nsynth /path/to/nsynth   # MIDI number from the file name, 60-1200 Hz only
+python3 eval/make_test_set.py wavebase eval/data/wavebase/base/guitar/stratocaster   # recorded guitar notes, CC0
 python3 eval/make_test_set.py own    /path/to/mine     # Fs3_take1.wav -> F#3 (note before the first '_')
 ```
+
+### `wavebase`
+
+Real single-note recordings from <https://github.com/cluesurf/wavebase> (CC0).
+The WAVs are Git LFS files; without `git lfs`, fetch them from
+`https://media.githubusercontent.com/media/cluesurf/wavebase/make/<path>`.
+The note comes from the file name (`...-as-Dx2.wav`, `...-note-A2-fret-07-1.wav`;
+`x` = sharp). Files that are still LFS pointers are skipped. They are direct
+electric-guitar recordings: real string spectra and decays, but no phone
+microphone or room.
 
 ### `synth`
 

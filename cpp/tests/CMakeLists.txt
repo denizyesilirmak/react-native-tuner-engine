@@ -12,6 +12,8 @@ add_executable(tuner_engine_tests
 )
 
 target_link_libraries(tuner_engine_tests PRIVATE tuner_engine_core)
+target_compile_definitions(tuner_engine_tests PRIVATE
+    TUNER_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 add_executable(tuner_engine_bench
     bench.cpp
