@@ -243,7 +243,7 @@ Configuration for the DSP pipeline. All fields optional — defaults are optimiz
 type TunerConfig = {
   sampleRate?: number;           // Default: 48000. Audio sample rate in Hz.
   frameSize?: number;            // Default: 2048. DSP frame size in samples.
-  noiseGateDb?: number;          // Default: -55. Frames quieter than this (dBFS) are ignored.
+  noiseGateDb?: number;          // Default: -70. Frames quieter than this (dBFS) are ignored.
   confidenceThreshold?: number;  // Default: 0.75. Minimum confidence (0–1) to report pitch.
   minFrequency?: number;         // Default: 60. Lowest detectable frequency in Hz.
   maxFrequency?: number;         // Default: 1200. Highest detectable frequency in Hz.
@@ -480,7 +480,7 @@ useTuner({
 ```typescript
 useTuner({
   instrument: 'bass',
-  noiseGateDb: -55,
+  noiseGateDb: -70,
   confidenceThreshold: 0.7,
   hpfCutoffHz: 30,        // Lower cutoff to preserve fundamental
   minFrequency: 25,       // B0 = 30.87 Hz
@@ -540,6 +540,12 @@ useTuner({
 | `hysteresisFrames` | Fast note switching (may bounce) | Stable display (slight delay) |
 | `hpfCutoffHz` | Preserves low fundamentals | Removes more rumble/handling noise |
 | `onsetDetection` | — (disabled) | Resets smoothing on note attacks → faster note switching |
+
+### Note hold (C++ core only)
+
+A ringing string's confidence sinks below `confidenceThreshold` (0.75) while the note is still clearly audible, so the needle used to vanish early. The core now keeps a note that is **already shown** alive at a lower confidence: a voiced frame is accepted when its SNR-weighted confidence is at least `minConfidence` (default 0.4), it is within `maxCents` (25) of the last reported frequency, and no more than `maxMissedFrames` (2) frames in a row were rejected. A gated frame, an onset, or changing the instrument/frequency range/post-processor config drops the hold. It never starts a note.
+
+Configure it with `TunerEngine::setNoteHold(Pipeline::NoteHold{...})` in C++ (`enabled = true` by default). It is not exposed through `TunerConfig` / the native bridges yet.
 
 ### Finding the Right `noiseGateDb`
 

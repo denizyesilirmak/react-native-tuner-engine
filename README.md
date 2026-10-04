@@ -101,7 +101,7 @@ const { start, stop, latest, isRunning, error } = useTuner({
   // All fields optional — defaults shown
   sampleRate?: number;          // 48000
   frameSize?: number;           // 2048
-  noiseGateDb?: number;         // -55 dBFS
+  noiseGateDb?: number;         // -70 dBFS
   confidenceThreshold?: number; // 0.75  (0–1)
   minFrequency?: number;        // 60 Hz
   maxFrequency?: number;        // 1200 Hz
@@ -159,7 +159,7 @@ type PitchEvent = {
 type TunerConfig = {
   sampleRate?: number;          // default 48000
   frameSize?: number;           // default 2048
-  noiseGateDb?: number;         // default -55 dBFS
+  noiseGateDb?: number;         // default -70 dBFS
   confidenceThreshold?: number; // default 0.75
   minFrequency?: number;        // default 60 Hz
   maxFrequency?: number;        // default 1200 Hz
@@ -200,7 +200,7 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 | — primary | `PyinPitchDetector` | Probabilistic YIN (Beta-distributed threshold prior, per-candidate probability mass) |
 | — corroborator | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; peak-vs-rival prominence confidence |
 | Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
-| SNR estimation | `SnrEstimator` | Signal RMS vs. a noise floor learned from every frame (fast fall, slow rise); full confidence weight from 18 dB SNR |
+| SNR estimation | `SnrEstimator` | Signal RMS vs. a noise floor learned from every frame (fast fall, slow rise); full confidence weight from 12 dB SNR |
 | Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing (configurable), note-transition hysteresis (configurable) |
 | Dispatch | `AudioFrameDispatcher` | SPSC lock-free queue, dedicated worker thread |
 

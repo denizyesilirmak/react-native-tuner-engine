@@ -21,6 +21,18 @@ constexpr float kNoCandidateFallbackWeight = 0.01f;
 constexpr float kContinuitySemitones = 0.75f;
 constexpr float kContinuityBonus     = 1.2f;
 
+// A candidate this much shallower than the winner may still replace it as the
+// fundamental (CMND depth units).
+constexpr float kSubharmonicDepthSlack = 0.1f;
+
+// True when `lag` is (within 3 %) an integer multiple, 1..8, of `base`.
+bool isMultipleOf(int lag, int base) {
+    const float ratio = static_cast<float>(lag) / static_cast<float>(base);
+    const float rounded = std::round(ratio);
+    return rounded >= 1.0f && rounded <= 8.0f
+        && std::fabs(ratio - rounded) <= 0.03f * rounded;
+}
+
 } // namespace
 
 PyinPitchDetector::PyinPitchDetector(float sampleRate, int frameSize)
@@ -146,6 +158,21 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
     }
     if (!winner) return DetectorResult{};
 
+    // The winner may be a multiple of the true period (T instead of T/2): the
+    // mass of a clean note is then split between the real fundamental and its
+    // multiples. Prefer the shortest-lag candidate the winner is a multiple of,
+    // as long as it is almost as periodic. Winner selection above is unchanged:
+    // ranking by "family mass" lets a spurious dip at T/2 always beat T.
+    for (const auto& candidate : candidates_) {
+        if (candidate.lag >= winner->lag) break;
+        if (static_cast<float>(winner->lag) / static_cast<float>(candidate.lag) < 1.5f) continue;
+        if (candidate.cmndDepth <= winner->cmndDepth + kSubharmonicDepthSlack
+            && isMultipleOf(winner->lag, candidate.lag)) {
+            winner = &candidate;
+            break;
+        }
+    }
+
     const float refinedLag = refineLagByParabola(winner->lag);
     if (refinedLag <= 0.0f) return DetectorResult{};
     const float pitchHz = rate / refinedLag;
@@ -155,9 +182,14 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
     // unambiguous winner scores near 1, an ambiguous or aperiodic frame scores
     // low. The pYIN mass decides WHICH candidate wins; the CMND depth keeps the
     // scale calibrated to the pipeline's confidence threshold.
+    // The mass of the winner's own multiples counts as support for it.
     float totalMass = 0.0f;
-    for (const auto& candidate : candidates_) totalMass += candidate.probability;
-    const float winnerMassShare = totalMass > 0.0f ? winner->probability / totalMass : 0.0f;
+    float familyMass = 0.0f;
+    for (const auto& candidate : candidates_) {
+        totalMass += candidate.probability;
+        if (isMultipleOf(candidate.lag, winner->lag)) familyMass += candidate.probability;
+    }
+    const float winnerMassShare = totalMass > 0.0f ? familyMass / totalMass : 0.0f;
     const float periodicity     = std::max(0.0f, 1.0f - winner->cmndDepth);
     const float confidence      = periodicity * winnerMassShare;
 

@@ -91,7 +91,7 @@ private:
     std::string currentTuning_;
     std::string currentTemperament_;
     float currentA4_{440.0f};
-    float currentNoiseGateDb_{-55.0f};
+    float currentNoiseGateDb_{-70.0f};
     float currentConfidenceThreshold_{0.75f};
     float currentMinHz_{60.0f};
     float currentMaxHz_{1200.0f};

@@ -33,7 +33,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     try {
       val sampleRate = if (opts?.hasKey("sampleRate") == true) opts.getDouble("sampleRate").toFloat() else 48000.0f
       val frameSize = if (opts?.hasKey("frameSize") == true) opts.getInt("frameSize") else 2048
-      val noiseGateDb = if (opts?.hasKey("noiseGateDb") == true) opts.getDouble("noiseGateDb").toFloat() else -55.0f
+      val noiseGateDb = if (opts?.hasKey("noiseGateDb") == true) opts.getDouble("noiseGateDb").toFloat() else -70.0f
       val confidenceThreshold = if (opts?.hasKey("confidenceThreshold") == true) opts.getDouble("confidenceThreshold").toFloat() else 0.75f
       val minFrequency = if (opts?.hasKey("minFrequency") == true) opts.getDouble("minFrequency").toFloat() else 60.0f
       val maxFrequency = if (opts?.hasKey("maxFrequency") == true) opts.getDouble("maxFrequency").toFloat() else 1200.0f

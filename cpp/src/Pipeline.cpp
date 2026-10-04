@@ -24,14 +24,17 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     if (rmsDb < noiseGateDb_) {
         // Gated frames are the best view of the room's noise floor.
         snr_.update(rmsLinear, false);
+        clearHold();
         PitchResult silent;
         silent.rmsDb = rmsDb;
+        silent.stage = PitchStage::Gated;
         return silent;
     }
 
     // --- Onset detection (no-op when disabled — single branch) ---
     if (onsetDetector_.detect(rmsDb)) {
         postProcessor_.reset();
+        clearHold();
     }
 
     // --- Working copy: HPF only.
@@ -48,9 +51,24 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     const float snrWeight = SnrEstimator::snrToWeight(snrDb);
     const float weightedConf = det.confidence * snrWeight;
 
-    if (!det.voiced || weightedConf < confidenceThreshold_) {
+    // A decaying string's confidence sinks below the threshold while the note
+    // is still clearly there. A frame close to the note already shown may
+    // continue it at a lower confidence; it can never start a note.
+    bool held = false;
+    if (noteHold_.enabled && heldFrequency_ > 0.0f && det.voiced
+        && weightedConf < confidenceThreshold_ && weightedConf >= noteHold_.minConfidence
+        && det.frequency > 0.0f) {
+        const float cents = 1200.0f * std::log2(det.frequency / heldFrequency_);
+        held = std::fabs(cents) <= noteHold_.maxCents;
+    }
+
+    if (!held && (!det.voiced || weightedConf < confidenceThreshold_)) {
+        registerMiss();
         PitchResult nopit;
         nopit.rmsDb = rmsDb;
+        nopit.stage = det.voiced ? PitchStage::LowConfidence : PitchStage::Unvoiced;
+        nopit.detectorConfidence = det.confidence;
+        nopit.snrDb = snrDb;
         return nopit;
     }
 
@@ -58,8 +76,12 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     PostProcessor::Result pp = postProcessor_.process(det.frequency, weightedConf);
 
     if (!pp.isStable || pp.frequency <= 0.0f) {
+        registerMiss();
         PitchResult nopit;
         nopit.rmsDb = rmsDb;
+        nopit.stage = PitchStage::Settling;
+        nopit.detectorConfidence = det.confidence;
+        nopit.snrDb = snrDb;
         return nopit;
     }
 
@@ -67,6 +89,11 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     PitchResult result = noteMapper_.map(pp.frequency, weightedConf, rmsDb);
     // Override cents with the hysteresis-stabilised value from PostProcessor
     result.cents = pp.cents;
+    heldFrequency_ = pp.frequency;
+    missedFrames_  = 0;
+    result.stage = PitchStage::Ok;
+    result.detectorConfidence = det.confidence;
+    result.snrDb = snrDb;
 
     // --- String matching (optional, only when a TuningProfile is active) ---
     if (stringMatcher_.hasTuning()) {
@@ -94,11 +121,13 @@ void Pipeline::setConfidenceThreshold(float threshold) {
 
 void Pipeline::setFrequencyRange(float minHz, float maxHz) {
     detector_->setFrequencyRange(minHz, maxHz);
+    clearHold();
 }
 
 void Pipeline::setInstrument(const std::string& name) {
     FrequencyRange r = instrumentPreset(name);
     detector_->setFrequencyRange(r.minHz, r.maxHz);
+    clearHold();
 }
 
 void Pipeline::setTuning(const std::string& name) {
@@ -111,6 +140,21 @@ void Pipeline::setTemperament(const std::string& name) {
 
 void Pipeline::setPostProcessorConfig(PostProcessor::Config cfg) {
     postProcessor_.setConfig(cfg);
+    clearHold();
+}
+
+void Pipeline::setNoteHold(NoteHold hold) {
+    noteHold_ = hold;
+    clearHold();
+}
+
+void Pipeline::clearHold() {
+    heldFrequency_ = 0.0f;
+    missedFrames_  = 0;
+}
+
+void Pipeline::registerMiss() {
+    if (++missedFrames_ > noteHold_.maxMissedFrames) clearHold();
 }
 
 void Pipeline::setHpfCutoff(float hz) {

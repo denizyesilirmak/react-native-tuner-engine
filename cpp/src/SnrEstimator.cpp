@@ -6,8 +6,8 @@
 static constexpr float kMinLinear = 1e-7f; // -140 dBFS floor
 
 // SNR at which the weight starts above zero, and where it reaches full trust.
-static constexpr float kWeightZeroSnrDb = 6.0f;
-static constexpr float kWeightFullSnrDb = 18.0f;
+static constexpr float kWeightZeroSnrDb = 3.0f;
+static constexpr float kWeightFullSnrDb = 12.0f;
 
 SnrEstimator::SnrEstimator(float floorInitDb)
     : noiseFloorLinear_(std::pow(10.0f, floorInitDb / 20.0f)) {}
@@ -30,7 +30,7 @@ float SnrEstimator::update(float rmsLinear, bool voiced) {
 }
 
 float SnrEstimator::snrToWeight(float snrDb) {
-    // Linear ramp: 6 dB SNR → 0, 18 dB → 1. A pitch 18 dB over the room is
+    // Linear ramp: 3 dB SNR → 0, 12 dB → 1. A pitch 12 dB over the room is
     // clean enough to trust fully; the detectors handle the rest.
     if (snrDb <= kWeightZeroSnrDb) return 0.0f;
     if (snrDb >= kWeightFullSnrDb) return 1.0f;

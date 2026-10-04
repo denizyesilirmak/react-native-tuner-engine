@@ -27,6 +27,7 @@ public:
     void setHpfCutoff(float hz);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
+    void setNoteHold(Pipeline::NoteHold hold);
 
 private:
     std::unique_ptr<Pipeline> pipeline_;

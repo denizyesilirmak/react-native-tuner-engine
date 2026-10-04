@@ -65,3 +65,7 @@ void TunerEngine::setOnsetDetectionEnabled(bool enabled) {
 void TunerEngine::setOnsetConfig(OnsetDetector::Config cfg) {
     pipeline_->setOnsetConfig(cfg);
 }
+
+void TunerEngine::setNoteHold(Pipeline::NoteHold hold) {
+    pipeline_->setNoteHold(hold);
+}

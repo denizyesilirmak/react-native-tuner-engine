@@ -124,7 +124,7 @@ if (rmsDb < noiseGateDb_) return silent;
 rms = sqrt( (x₀² + x₁² + ... + xₙ₋₁²) / n )
 ```
 
-Sonuç decibel'e çevrilir: `dBFS = 20 * log10(rms)`. Eğer bu değer ayarlanan `noiseGateDb` eşiğinin altındaysa (varsayılan -55 dB), frame tamamen sessiz sayılır ve işlenmez. Bu hem CPU tasarrufu sağlar hem de gürültülü ama sessiz ortamlarda yanlış nota tespitini önler.
+Sonuç decibel'e çevrilir: `dBFS = 20 * log10(rms)`. Eğer bu değer ayarlanan `noiseGateDb` eşiğinin altındaysa (varsayılan -70 dB), frame tamamen sessiz sayılır ve işlenmez. Bu hem CPU tasarrufu sağlar hem de gürültülü ama sessiz ortamlarda yanlış nota tespitini önler.
 
 ### Adım 2: Yüksek Geçiren Filtre (HPF)
 
@@ -583,14 +583,14 @@ snrDb = 20 * log10(rmsLinear / noiseFloorLinear)
 
 ```cpp
 float snrToWeight(float snrDb) {
-    if (snrDb <= 0.0f)  return 0.0f;
-    if (snrDb >= 30.0f) return 1.0f;
-    return snrDb / 30.0f;
+    if (snrDb <= 3.0f)  return 0.0f;
+    if (snrDb >= 12.0f) return 1.0f;
+    return (snrDb - 3.0f) / 9.0f;
 }
 ```
 
-0 dB SNR → ağırlık 0 (sinyal gürültüyle eşit güçte, güvenilmez).
-30 dB SNR → ağırlık 1 (sinyal gürültüden 1000× daha güçlü, tam güven).
+3 dB SNR ve altı → ağırlık 0 (sinyal gürültüden neredeyse ayırt edilemez, güvenilmez).
+12 dB SNR ve üstü → ağırlık 1 (sinyal gürültüden ~4× güçlü, tam güven).
 
 Pipeline'da: `weightedConf = det.confidence * snrWeight`. Bu, gürültülü ortamda sistematik olarak düşük güven skoru üretir ve eşik altında kalarak yanlış nota basılmasını önler.
 
@@ -655,6 +655,16 @@ if (newMidi == lockedMidi_) {
 ```
 
 Varsayılan `hysteresisFrames = 3` — yeni nota 3 ardışık frame boyunca stabil görünürse geçiş yapılır. Bu ~128ms gecikme demektir (2048/48000 ≈ 43ms/frame × 3). Tuner için kabul edilebilir bir gecikme: yeterince hızlı ama kararlı.
+
+### Nota Tutma (Note Hold)
+
+Çalan bir tel sönerken güven skoru yavaşça düşer ve nota hâlâ net duyulurken 0.75 eşiğinin altına iner; ibre erken kaybolur. Pipeline bunun için ikinci, daha düşük bir eşik kullanır:
+
+- Ekranda zaten bir nota varsa (`heldFrequency_`, son raporlanan frekans) ve yeni frame sesli, ağırlıklı güveni `minConfidence` (0.4) ile `confidenceThreshold` (0.75) arasında ve frekansı tutulan frekansa en fazla `maxCents` (25 cent) uzaktaysa frame kabul edilir ve normal bir frame gibi PostProcessor ve NoteMapper'dan geçer.
+- Reddedilen her frame `missedFrames_` sayacını artırır; `maxMissedFrames` (2) aşılınca tutma bırakılır. Gate'e takılan frame, onset ve PostProcessor/frekans aralığı/enstrüman değişiklikleri tutmayı hemen sıfırlar.
+- Not tutma bir notayı **başlatamaz**: ekranda nota yokken yalnızca normal eşik geçerlidir. Tutulan nota her başarılı frame'de güncellendiği için yavaş çevrilen bir burgu da tutulmaya devam eder.
+
+Ayarlar `Pipeline::NoteHold` / `TunerEngine::setNoteHold()` ile yapılır (`enabled = true`). Şimdilik yalnızca C++ çekirdeğinde vardır, JS/native köprülerinden ayarlanamaz.
 
 ---
 

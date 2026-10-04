@@ -19,5 +19,11 @@ add_executable(tuner_engine_bench
 
 target_link_libraries(tuner_engine_bench PRIVATE tuner_engine_core)
 
+add_executable(tuner_engine_eval
+    eval.cpp
+)
+
+target_link_libraries(tuner_engine_eval PRIVATE tuner_engine_core)
+
 enable_testing()
 add_test(NAME tuner_engine_tests COMMAND tuner_engine_tests)

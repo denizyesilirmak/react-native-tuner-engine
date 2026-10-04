@@ -17,6 +17,15 @@
 // Ordered DSP chain: HPF → Hann window → IPitchDetector → SNR weighting → PostProcessor → NoteMapper → StringMatcher.
 class Pipeline {
 public:
+    // Continues a note that is already shown through frames whose confidence
+    // dips below the normal threshold (a decaying string). It never starts a note.
+    struct NoteHold {
+        float minConfidence   = 0.4f;  // weighted confidence needed to continue the note
+        float maxCents        = 25.0f; // max distance from the last reported frequency
+        int   maxMissedFrames = 2;     // rejected frames tolerated before the hold is dropped
+        bool  enabled         = true;
+    };
+
     Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector);
 
     PitchResult process(const float* input, int frameCount);
@@ -32,12 +41,13 @@ public:
     void setHpfCutoff(float hz);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
+    void setNoteHold(NoteHold hold);
 
 private:
     int frameSize_;
     float sampleRate_;
 
-    float noiseGateDb_           = -55.0f;
+    float noiseGateDb_           = -70.0f;
     float confidenceThreshold_   =  0.75f;
 
     BiquadHpf hpf_;
@@ -48,6 +58,13 @@ private:
     PostProcessor postProcessor_;
     NoteMapper noteMapper_;
     StringMatcher stringMatcher_;
+
+    NoteHold noteHold_;
+    float heldFrequency_ = 0.0f; // last reported frequency; 0 = no note shown
+    int   missedFrames_  = 0;
+
+    void clearHold();
+    void registerMiss();
 
     std::vector<float> workBuffer_; // HPF + windowing happen here (copy of input)
 

@@ -27,7 +27,7 @@ export type TunerConfig = {
   sampleRate?: number;
   /** DSP frame size in samples. Default: 2048 */
   frameSize?: number;
-  /** Noise gate threshold in dBFS. Frames quieter than this are ignored. Default: -55 */
+  /** Noise gate threshold in dBFS. Frames quieter than this are ignored. Default: -70 */
   noiseGateDb?: number;
   /** Minimum detector confidence (0–1) to emit a pitch event. Default: 0.75 */
   confidenceThreshold?: number;

@@ -698,11 +698,11 @@ static std::vector<float> generateNoise(int sampleCount, float rmsDb, uint32_t s
 }
 
 static void testSnrEstimator() {
-    // Weight ramp: nothing below 6 dB, full trust from 18 dB.
+    // Weight ramp: nothing below 3 dB, full trust from 12 dB.
     assertNear(SnrEstimator::snrToWeight(0.0f),  0.0f, 1e-6f);
-    assertNear(SnrEstimator::snrToWeight(6.0f),  0.0f, 1e-6f);
-    assertNear(SnrEstimator::snrToWeight(12.0f), 0.5f, 1e-6f);
-    assertNear(SnrEstimator::snrToWeight(18.0f), 1.0f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(3.0f),  0.0f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(7.5f),  0.5f, 1e-6f);
+    assertNear(SnrEstimator::snrToWeight(12.0f), 1.0f, 1e-6f);
     assertNear(SnrEstimator::snrToWeight(40.0f), 1.0f, 1e-6f);
 
     // A noisy room: unpitched frames at -45 dBFS must raise the floor there,
@@ -735,7 +735,7 @@ static void testSnrEstimator() {
 
 static void testPipelineDistantGuitar() {
     // A string plucked at arm's length reaches the phone mic around -50 dBFS
-    // (no AGC in measurement mode), just over the default -55 dB gate, in a
+    // (no AGC in measurement mode), well over the default -70 dB gate, in a
     // quiet room at about -75 dBFS. It must still be tuned.
     constexpr float sr = 48000.0f;
     constexpr int   n  = 4096;
@@ -798,6 +798,249 @@ static void testPipelineRejectsToneBuriedInNoise() {
     assert(pitched == 0);
 }
 
+static void testPipelineQuietTailStillTuned() {
+    // The tail of a ringing string: a G3 at -62 dBFS (13 dB over a -75 dBFS
+    // room). Noise alone must stay silent, and the note must keep the needle.
+    // Fails with a -55 dB gate (note gated) and with the 6→18 dB SNR ramp
+    // (weight 0.6 → confidence under the threshold).
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   noiseFrames = 30;
+    constexpr int   noteFrames  = 12;
+
+    auto input = generateNoise(n * (noiseFrames + noteFrames), -75.0f);
+    auto tone  = generateHarmonicTone(196.0f, sr, n * noteFrames); // G3
+    const float toneScale = dbToLinear(-62.0f) / rmsOf(tone.data(), static_cast<int>(tone.size()));
+    for (size_t i = 0; i < tone.size(); ++i) {
+        input[noiseFrames * n + i] += tone[i] * toneScale;
+    }
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    int noisePitched = 0;
+    int notePitched = 0;
+    PitchResult last;
+    for (int f = 0; f < noiseFrames + noteFrames; ++f) {
+        last = engine.process(input.data() + f * n, n);
+        if (f < noiseFrames && last.hasPitch) ++noisePitched;
+        if (f >= noiseFrames && last.hasPitch) ++notePitched;
+    }
+
+    std::cout << "quiet tail G3 @ -62 dBFS: noise-frame pitches=" << noisePitched
+              << " note frames pitched=" << notePitched << "/" << noteFrames
+              << " last=" << last.noteName << last.octave << "\n";
+
+    assert(noisePitched == 0);
+    assert(notePitched >= 8);
+    assert(last.hasPitch && last.noteName == "G" && last.octave == 3);
+}
+
+static void testPyinMultiplesDoNotSplitConfidence() {
+    // A clean periodic tone also dips at 2T, 3T... When the winner's mass is
+    // compared with the total, those multiples used to dilute the confidence of
+    // a perfectly good G4 at 8 dB SNR. Fails with the old pYIN.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   trials = 20;
+
+    auto tone = generateHarmonicTone(392.0f, sr, n);
+    const float toneScale = dbToLinear(-32.0f) / rmsOf(tone.data(), n);
+    for (auto& v : tone) v *= toneScale;
+
+    int confident = 0;
+    float minConf = 1.0f;
+    for (int seed = 0; seed < trials; ++seed) {
+        auto frame = generateNoise(n, -40.0f, 0xC0FFEEu + 7919u * static_cast<uint32_t>(seed));
+        for (int i = 0; i < n; ++i) frame[i] += tone[i];
+
+        PyinPitchDetector pyin(sr, n);
+        auto r = pyin.detect(frame.data(), n, sr);
+
+        assert(r.voiced);
+        assert(std::fabs(r.frequency - 392.0f) / 392.0f < 0.01f);
+        if (r.confidence >= 0.75f) ++confident;
+        minConf = std::min(minConf, r.confidence);
+    }
+
+    std::cout << "pyin G4 @ 8 dB SNR: confident " << confident << "/" << trials
+              << " min conf=" << minConf << "\n";
+
+    assert(confident >= 18);
+}
+
+// --- Note hold -------------------------------------------------------------
+
+// One frame of a harmonic tone at toneDb (RMS dBFS) over -75 dBFS white noise.
+static std::vector<float> toneOverRoom(float hz, float toneDb, uint32_t seed, int n = 2048) {
+    auto frame = generateNoise(n, -75.0f, seed);
+    auto tone  = generateHarmonicTone(hz, 48000.0f, n);
+    const float k = dbToLinear(toneDb) / rmsOf(tone.data(), n);
+    for (int i = 0; i < n; ++i) frame[i] += tone[i] * k;
+    return frame;
+}
+
+// Tone whose level glides linearly in dB across the frame, over -75 dBFS noise.
+// Real streams have no level steps; independent frames with a 27 dB step would
+// excite the HPF's carried-over state and distort the next frame.
+static std::vector<float> rampFrame(float hz, float fromDb, float toDb, uint32_t seed, int n = 2048) {
+    auto frame = generateNoise(n, -75.0f, seed);
+    auto tone  = generateHarmonicTone(hz, 48000.0f, n);
+    const float unit = 1.0f / rmsOf(tone.data(), n);
+    for (int i = 0; i < n; ++i) {
+        const float db = fromDb + (toDb - fromDb) * static_cast<float>(i) / static_cast<float>(n);
+        frame[i] += tone[i] * unit * dbToLinear(db);
+    }
+    return frame;
+}
+
+// Fresh engine whose SNR floor has learned the room, locked onto `hz`, then
+// faded from -40 to -67 dBFS in one frame, ready for weak (-67 dBFS) frames.
+static void lockNote(TunerEngine& engine, float hz, int n = 2048) {
+    for (int f = 0; f < 30; ++f) {
+        auto noise = generateNoise(n, -75.0f, 0xA000u + static_cast<uint32_t>(f));
+        engine.process(noise.data(), n);
+    }
+    for (int f = 0; f < 8; ++f) {
+        auto frame = toneOverRoom(hz, -40.0f, 0xB000u + static_cast<uint32_t>(f));
+        engine.process(frame.data(), n);
+    }
+    auto fade = rampFrame(hz, -40.0f, -67.0f, 0xB100u);
+    engine.process(fade.data(), n);
+}
+
+static void testNoteHoldKeepsDecayingNote() {
+    // G3 decaying exponentially (linear in dB) from -35 to -68 dBFS over ~40
+    // frames. Its confidence sinks below 0.75 well before the note is gone.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   noiseFrames = 10;
+    constexpr int   noteFrames  = 40;
+
+    auto noise = generateNoise(n * (noiseFrames + noteFrames), -75.0f);
+    auto tone  = generateHarmonicTone(196.0f, sr, n * noteFrames);
+    const float unit = 1.0f / rmsOf(tone.data(), static_cast<int>(tone.size()));
+    std::vector<float> input = noise;
+    for (int i = 0; i < n * noteFrames; ++i) {
+        const float levelDb = -35.0f - 33.0f * static_cast<float>(i) / static_cast<float>(n * noteFrames);
+        input[noiseFrames * n + i] += tone[i] * unit * dbToLinear(levelDb);
+    }
+
+    auto run = [&](bool hold, int& wrongNote) {
+        TunerEngine engine(sr, n);
+        engine.setInstrument("guitar");
+        Pipeline::NoteHold cfg;
+        cfg.enabled = hold;
+        engine.setNoteHold(cfg);
+        int pitched = 0;
+        wrongNote = 0;
+        for (int f = noiseFrames; f < noiseFrames + noteFrames; ++f) {
+            auto r = engine.process(input.data() + f * n, n);
+            if (!r.hasPitch) continue;
+            ++pitched;
+            if (r.noteName != "G" || r.octave != 3) ++wrongNote;
+        }
+        return pitched;
+    };
+
+    int wrongOn = 0, wrongOff = 0;
+    const int withHold    = run(true, wrongOn);
+    const int withoutHold = run(false, wrongOff);
+
+    std::cout << "note hold, decaying G3: pitched frames hold=" << withHold
+              << " no hold=" << withoutHold << " (wrong note " << wrongOn << ")\n";
+
+    assert(withHold > withoutHold);
+    assert(wrongOn == 0);
+}
+
+static void testNoteHoldDoesNotStartOrJump() {
+    constexpr int n = 2048;
+
+    // (a) Weak tone on a fresh engine: confident enough to hold a note, not to
+    // start one. It must stay silent, and be rejected for confidence only.
+    {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        for (int f = 0; f < 30; ++f) {
+            auto noise = generateNoise(n, -75.0f, 0xA000u + static_cast<uint32_t>(f));
+            engine.process(noise.data(), n);
+        }
+        int pitched = 0;
+        PitchResult r;
+        for (int f = 0; f < 12; ++f) {
+            auto frame = toneOverRoom(196.0f, -67.0f, 0xC000u + static_cast<uint32_t>(f));
+            r = engine.process(frame.data(), n);
+            if (r.hasPitch) ++pitched;
+            const float weighted = r.detectorConfidence * SnrEstimator::snrToWeight(r.snrDb);
+            assert(r.stage == PitchStage::LowConfidence);
+            assert(weighted >= 0.4f && weighted < 0.75f);
+        }
+        std::cout << "note hold, fresh engine weak tone: pitched=" << pitched << "/12\n";
+        assert(pitched == 0);
+    }
+
+    // (b) Locked on A2, then a weak detection a semitone up (A#2): neither held
+    // as A2 nor reported.
+    {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        lockNote(engine, 110.0f);
+        auto frame = toneOverRoom(116.54f, -67.0f, 0xD000u);
+        auto r = engine.process(frame.data(), n);
+        std::cout << "note hold, weak A#2 after A2: hasPitch=" << r.hasPitch
+                  << " stage=" << int(r.stage) << "\n";
+        assert(!r.hasPitch);
+        assert(r.stage == PitchStage::LowConfidence);
+    }
+}
+
+static void testNoteHoldReleases() {
+    constexpr int n = 2048;
+    auto weakG3 = [&](uint32_t seed) { return toneOverRoom(196.0f, -67.0f, seed); };
+
+    // Control: right after the lock a weak frame IS held.
+    {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        lockNote(engine, 196.0f);
+        auto f = weakG3(0xF001u);
+        auto r = engine.process(f.data(), n);
+        assert(r.hasPitch && r.noteName == "G" && r.octave == 3);
+    }
+
+    // One missed frame (maxMissedFrames = 2) keeps the hold; three drop it.
+    for (int misses = 1; misses <= 3; ++misses) {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        lockNote(engine, 196.0f);
+        for (int m = 0; m < misses; ++m) {
+            auto noise = generateNoise(n, -62.0f, 0xE000u + static_cast<uint32_t>(m));
+            auto r = engine.process(noise.data(), n);
+            assert(!r.hasPitch); // noise alone is never a note
+        }
+        auto f = weakG3(0xF002u);
+        auto r = engine.process(f.data(), n);
+        std::cout << "note hold release: " << misses << " missed frames, weak G3 hasPitch="
+                  << r.hasPitch << "\n";
+        assert(r.hasPitch == (misses <= 2));
+    }
+
+    // A gated frame releases it at once.
+    {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        lockNote(engine, 196.0f);
+        // Room noise under the gate: leaves the SNR floor where it was.
+        auto room = generateNoise(n, -75.0f, 0xE100u);
+        auto g = engine.process(room.data(), n);
+        assert(g.stage == PitchStage::Gated);
+        auto f = weakG3(0xF003u);
+        auto r = engine.process(f.data(), n);
+        assert(!r.hasPitch);
+    }
+}
+
 int main() {
     testNoteMapper();
 
@@ -845,6 +1088,11 @@ int main() {
     testSnrEstimator();
     testPipelineDistantGuitar();
     testPipelineRejectsToneBuriedInNoise();
+    testPipelineQuietTailStillTuned();
+    testPyinMultiplesDoNotSplitConfidence();
+    testNoteHoldKeepsDecayingNote();
+    testNoteHoldDoesNotStartOrJump();
+    testNoteHoldReleases();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();
