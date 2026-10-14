@@ -90,6 +90,22 @@ class TunerEngine {
     NativeTunerEngine.setTuning(name);
   }
 
+  /**
+   * Shifts every string target of the active tuning by `semitones`
+   * (fractional allowed). Use it for instruments whose notated tuning floats
+   * with the player or the instrument size — a cura reads as a bağlama
+   * tuned +5, a Si-karar short-neck as +2. Persists across setTuning() and
+   * setInstrument(); pass 0 to clear.
+   */
+  setTuningTranspose(semitones: number): void {
+    if (!Number.isFinite(semitones)) {
+      if (__DEV__)
+        console.warn(`[TunerEngine] Invalid transpose: "${semitones}"`);
+      return;
+    }
+    NativeTunerEngine.setTuningTranspose(semitones);
+  }
+
   getStatus(): EngineStatus {
     return NativeTunerEngine.getStatus() as unknown as EngineStatus;
   }

@@ -163,6 +163,10 @@
   if (_dispatcher) _dispatcher->setTuning(std::string([name UTF8String]));
 }
 
+- (void)setTuningTranspose:(float)semitones {
+  if (_dispatcher) _dispatcher->setTuningTranspose(semitones);
+}
+
 - (void)setTemperament:(NSString *)name {
   if (_dispatcher) _dispatcher->setTemperament(std::string([name UTF8String]));
 }

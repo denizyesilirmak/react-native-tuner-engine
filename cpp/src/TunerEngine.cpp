@@ -46,6 +46,10 @@ void TunerEngine::setTuning(const std::string& name) {
     pipeline_->setTuning(name);
 }
 
+void TunerEngine::setTuningTranspose(float semitones) {
+    pipeline_->setTuningTranspose(semitones);
+}
+
 void TunerEngine::setTemperament(const std::string& name) {
     pipeline_->setTemperament(name);
 }

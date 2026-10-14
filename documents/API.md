@@ -80,6 +80,8 @@ All fields are optional. Extends `TunerConfig` with:
 |-------|------|---------|-------------|
 | `instrument` | `Instrument` | `undefined` | Activates the string-matching profile for this instrument |
 | `a4` | `number` | `440` | A4 reference pitch in Hz |
+| `tuning` | `TuningPreset \| ''` | instrument default | Overrides the instrument's default tuning; `''` disables string matching |
+| `tuningTranspose` | `number` | `0` | Shifts every string target by this many semitones (see `setTuningTranspose`) |
 | _...all `TunerConfig` fields_ | | | See [TunerConfig](#tunerconfig) |
 
 ### UseTunerResult
@@ -97,7 +99,7 @@ All fields are optional. Extends `TunerConfig` with:
 1. Calling `start()`:
    - Requests microphone permission
    - Calls `TunerEngine.configure(config)`
-   - Sets instrument and A4 if provided
+   - Sets instrument, tuning, tuning transpose and A4 if provided
    - Subscribes to pitch events
    - Starts native audio capture
 2. Calling `stop()`:
@@ -189,6 +191,17 @@ Sets a specific tuning preset. Pass `''` to disable string matching.
 
 ```typescript
 TunerEngine.setTuning('guitar_drop_d');
+```
+
+---
+
+#### `setTuningTranspose(semitones: number): void`
+
+Shifts every string target of the active tuning by `semitones` (fractional values allowed). Bağlama tunings are notated with the alt course on A3, but the real pitch follows the player and the instrument size: a cura is the same düzen a fourth up, a Si-karar short-neck a tone up. The transpose survives `setTuning()` and `setInstrument()`; pass `0` to clear it. `PitchEvent.nearestString` keeps the notated name.
+
+```typescript
+TunerEngine.setInstrument('baglama');   // baglama_kara: G3 D3 A3
+TunerEngine.setTuningTranspose(5);      // now matches C4 G3 D4
 ```
 
 ---
@@ -292,6 +305,8 @@ type PitchEvent = {
 };
 ```
 
+String targets are scaled by the A4 reference and by `setTuningTranspose()`. For a course flagged with an octave string (bağlama, bouzouki) the engine matches either octave and reports the deviation from whichever string was closer, under the course's notated name.
+
 **Note on `hasPitch: false` frames:**  
 When the signal is below the noise gate or confidence is too low, `hasPitch` is `false`. All other fields will be zero/empty. Use this to show "listening…" states in your UI.
 
@@ -309,6 +324,10 @@ type Instrument =
   | 'ukulele'   // (G4–A4)
   | 'mandolin'  // (G3–E5)
   | 'banjo'     // 5-string (D3–D4)
+  | 'oud'       // Turkish / Arabic oud, 6 courses (C2–D4), 4096 frame
+  | 'cumbus'    // 6 courses (A2–G4)
+  | 'baglama'   // 3 courses, notated G3 D3 A3 — pair with setTuningTranspose()
+  | 'bouzouki'  // Greek 3/4-course and Irish (C3–D4)
   | 'chromatic'; // No string matching, full range
 ```
 
@@ -332,8 +351,44 @@ type TuningPreset =
   | 'violin_standard'      // G3 D4 A4 E5
   | 'viola_standard'       // C3 G3 D4 A4
   | 'cello_standard'       // C2 G2 D3 A3
-  | 'ukulele_standard';    // G4 C4 E4 A4
+  | 'ukulele_standard'     // G4 C4 E4 A4
+  | 'oud_turkish'          // C#2 F#2 B2 E3 A3 D4 (Bolahenk, default)
+  | 'oud_turkish_d'        // D2 A2 B2 E3 A3 D4
+  | 'oud_arabic'           // C2 F2 A2 D3 G3 C4
+  | 'oud_arabic_old'       // D2 G2 A2 D3 G3 C4
+  | 'oud_arabic_high'      // F2 A2 D3 G3 C4 F4
+  | 'cumbus_standard'      // A2 B2 E3 A3 D4 G4 (oud presets also apply)
+  | 'baglama_kara'         // üst G3, orta D3(+D4), alt A3(+A2) — kara / bozuk düzen (default)
+  | 'baglama_baglama'      // E3 D3 A3 — bağlama düzeni
+  | 'baglama_misket'       // F#3 D3 A3
+  | 'baglama_mustezat'     // F3 D3 A3
+  | 'baglama_abdal'        // G3 A3 A3
+  | 'baglama_fidayda'      // D3 D3 A3
+  | 'bouzouki_tetrachordo' // C3(+C4) F3(+F4) A3 D4 (default)
+  | 'bouzouki_trichordo'   // D3(+D4) A3 D4
+  | 'bouzouki_irish';      // G2(+G3) D3(+D4) A3 D4
 ```
+
+`(+X)` marks a course that also carries a string one octave away; the engine matches either octave to that course. Bağlama presets are notated in Turkish folk convention (alt course on A) — use `setTuningTranspose()` for the real pitch.
+
+### `TuningProfile` / `TuningString`
+
+```typescript
+type TuningString = {
+  name: string;              // notated open-string name, e.g. "E2"
+  stringNumber: number;      // 1-based, lowest first
+  frequency: number;         // Hz at A4 = 440, no transpose
+  octaveOffset: -1 | 0 | 1;  // octave partner string, 0 = unison course
+};
+
+type TuningProfile = {
+  id: TuningPreset;
+  instrument: Instrument;
+  strings: TuningString[];
+};
+```
+
+`TUNING_PROFILES` (a `Record<TuningPreset, TuningProfile>`), `getTuningProfile(id)`, `getTuningsForInstrument(instrument)` and `resolveTuningStrings(id, { a4, transpose })` expose the native table to JS. The jest suite checks it against `cpp/include/TuningPresets.hpp`.
 
 ---
 

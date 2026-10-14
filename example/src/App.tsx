@@ -2,7 +2,11 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useTuner } from 'react-native-tuner-engine';
-import type { Instrument, QualityPreset } from 'react-native-tuner-engine';
+import type {
+  Instrument,
+  QualityPreset,
+  TuningPreset,
+} from 'react-native-tuner-engine';
 import { TunerView } from './components/TunerView';
 import { SettingsView } from './components/SettingsView';
 
@@ -13,6 +17,8 @@ export default function App() {
   const [noiseGateDb, setNoiseGateDb] = useState(-50);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.75);
   const [instrument, setInstrument] = useState<Instrument>('guitar');
+  const [tuning, setTuning] = useState<TuningPreset | undefined>(undefined);
+  const [tuningTranspose, setTuningTranspose] = useState(0);
   const [emaAlpha, setEmaAlpha] = useState(0.35);
   const [hysteresisFrames, setHysteresisFrames] = useState(3);
   const [hpfCutoffHz, setHpfCutoffHz] = useState(70);
@@ -27,6 +33,8 @@ export default function App() {
     noiseGateDb,
     confidenceThreshold,
     instrument,
+    tuning,
+    tuningTranspose,
     emaAlpha,
     hysteresisFrames,
     hpfCutoffHz,
@@ -37,6 +45,13 @@ export default function App() {
     quality,
     overlapRatio,
   });
+
+  // A tuning belongs to one instrument, so fall back to the new instrument's
+  // default whenever the instrument changes.
+  const handleInstrumentChange = (next: Instrument) => {
+    setInstrument(next);
+    setTuning(undefined);
+  };
 
   return (
     <SafeAreaProvider>
@@ -79,6 +94,8 @@ export default function App() {
         ) : (
           <SettingsView
             instrument={instrument}
+            tuning={tuning}
+            tuningTranspose={tuningTranspose}
             a4={a4}
             noiseGateDb={noiseGateDb}
             confidenceThreshold={confidenceThreshold}
@@ -88,7 +105,9 @@ export default function App() {
             minFrequency={minFrequency}
             maxFrequency={maxFrequency}
             onsetDetection={onsetDetection}
-            onInstrumentChange={setInstrument}
+            onInstrumentChange={handleInstrumentChange}
+            onTuningChange={setTuning}
+            onTuningTransposeChange={setTuningTranspose}
             onA4Change={setA4}
             onNoiseGateDbChange={setNoiseGateDb}
             onConfidenceThresholdChange={setConfidenceThreshold}

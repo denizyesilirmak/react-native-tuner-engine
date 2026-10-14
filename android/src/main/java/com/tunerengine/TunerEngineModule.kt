@@ -100,6 +100,10 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
     nativeSetTuning(name)
   }
 
+  override fun setTuningTranspose(semitones: Double) {
+    nativeSetTuningTranspose(semitones.toFloat())
+  }
+
   override fun setTemperament(name: String) {
     nativeSetTemperament(name)
   }
@@ -211,6 +215,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetA4(hz: Float)
   private external fun nativeSetInstrument(name: String)
   private external fun nativeSetTuning(name: String)
+  private external fun nativeSetTuningTranspose(semitones: Float)
   private external fun nativeSetHpfCutoff(hz: Float)
   private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
   private external fun nativeSetOnsetDetection(enabled: Boolean)

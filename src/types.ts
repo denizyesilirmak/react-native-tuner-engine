@@ -7,6 +7,10 @@ export const INSTRUMENTS = [
   'ukulele',
   'mandolin',
   'banjo',
+  'oud',
+  'cumbus',
+  'baglama',
+  'bouzouki',
   'chromatic',
 ] as const;
 export type Instrument = (typeof INSTRUMENTS)[number];
@@ -97,8 +101,47 @@ export const TUNING_PRESETS = [
   'viola_standard',
   'cello_standard',
   'ukulele_standard',
+  'oud_turkish',
+  'oud_turkish_d',
+  'oud_arabic',
+  'oud_arabic_old',
+  'oud_arabic_high',
+  'cumbus_standard',
+  'baglama_kara',
+  'baglama_baglama',
+  'baglama_misket',
+  'baglama_mustezat',
+  'baglama_abdal',
+  'baglama_fidayda',
+  'bouzouki_tetrachordo',
+  'bouzouki_trichordo',
+  'bouzouki_irish',
 ] as const;
 export type TuningPreset = (typeof TUNING_PRESETS)[number];
+
+/**
+ * One string or course of a tuning preset, as the C++ core matches it.
+ */
+export type TuningString = {
+  /** Notated open-string name at A4 = 440, e.g. "E2". */
+  name: string;
+  /** 1-based, thickest/lowest first — the order the engine reports. */
+  stringNumber: number;
+  /** Open-string frequency in Hz at A4 = 440 and no transpose. */
+  frequency: number;
+  /**
+   * Octave-paired course: the course also carries a string one octave above
+   * (+1) or below (-1). The engine matches either octave to this course.
+   * 0 for a unison course.
+   */
+  octaveOffset: -1 | 0 | 1;
+};
+
+export type TuningProfile = {
+  id: TuningPreset;
+  instrument: Instrument;
+  strings: TuningString[];
+};
 
 export type PitchEvent = {
   hasPitch: boolean;

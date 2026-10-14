@@ -333,6 +333,14 @@ Java_com_tunerengine_TunerEngineModule_nativeSetTuning(
     env->ReleaseStringUTFChars(name, nameChars);
 }
 
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetTuningTranspose(
+    JNIEnv* /*env*/, jobject /*thiz*/, jfloat semitones
+) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (gDispatcher) gDispatcher->setTuningTranspose(static_cast<float>(semitones));
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeIsRunning(
     JNIEnv* /*env*/, jobject /*thiz*/

@@ -64,6 +64,10 @@ RCT_EXPORT_MODULE(TunerEngine)
   [_tunerBridge setTuning:name];
 }
 
+- (void)setTuningTranspose:(double)semitones {
+  [_tunerBridge setTuningTranspose:(float)semitones];
+}
+
 - (void)setTemperament:(NSString *)name {
   [_tunerBridge setTemperament:name];
 }

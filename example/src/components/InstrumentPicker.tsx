@@ -11,6 +11,10 @@ const INSTRUMENTS: Instrument[] = [
   'ukulele',
   'mandolin',
   'banjo',
+  'oud',
+  'cumbus',
+  'baglama',
+  'bouzouki',
   'chromatic',
 ];
 

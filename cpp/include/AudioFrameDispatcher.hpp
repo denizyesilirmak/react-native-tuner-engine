@@ -48,6 +48,7 @@ public:
     void setFrequencyRange(float minHz, float maxHz);
     void setInstrument(const std::string& name);
     void setTuning(const std::string& name);
+    void setTuningTranspose(float semitones);
     void setTemperament(const std::string& name);
     void setAdaptiveFrameSize(bool enabled);
     void setPostProcessorConfig(PostProcessor::Config cfg);
@@ -89,6 +90,7 @@ private:
     // Cached settings — re-applied after engine recreation (setSampleRate / reconfigure)
     std::string currentInstrument_;
     std::string currentTuning_;
+    float currentTuningTranspose_{0.0f};
     std::string currentTemperament_;
     float currentA4_{440.0f};
     float currentNoiseGateDb_{-70.0f};

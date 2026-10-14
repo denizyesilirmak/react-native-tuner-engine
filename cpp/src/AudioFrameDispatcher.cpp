@@ -99,6 +99,12 @@ void AudioFrameDispatcher::setTuning(const std::string& name) {
     if (engine_) engine_->setTuning(name);
 }
 
+void AudioFrameDispatcher::setTuningTranspose(float semitones) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    currentTuningTranspose_ = semitones;
+    if (engine_) engine_->setTuningTranspose(semitones);
+}
+
 void AudioFrameDispatcher::setTemperament(const std::string& name) {
     std::lock_guard<std::mutex> lock(engineMutex_);
     currentTemperament_ = name;
@@ -151,6 +157,7 @@ void AudioFrameDispatcher::applyStoredSettings() {
     engine_->setOnsetDetectionEnabled(currentOnsetEnabled_);
     if (!currentInstrument_.empty()) engine_->setInstrument(currentInstrument_);
     if (!currentTuning_.empty()) engine_->setTuning(currentTuning_);
+    engine_->setTuningTranspose(currentTuningTranspose_);
     if (!currentTemperament_.empty()) engine_->setTemperament(currentTemperament_);
 }
 

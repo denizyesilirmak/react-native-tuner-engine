@@ -10,11 +10,24 @@ bool StringMatcher::hasTuning() const {
     return profile_ != nullptr && profile_->stringCount > 0;
 }
 
+void StringMatcher::setA4(float hz) {
+    if (hz > 0.0f) a4_ = hz;
+}
+
+void StringMatcher::setTranspose(float semitones) {
+    if (std::isfinite(semitones)) transposeSemitones_ = semitones;
+}
+
+float StringMatcher::scale() const {
+    return (a4_ / 440.0f) * std::pow(2.0f, transposeSemitones_ / 12.0f);
+}
+
 std::optional<StringMatch> StringMatcher::match(float frequency,
                                                   float maxDeviationCents) const {
     if (!hasTuning() || frequency <= 0.0f) return std::nullopt;
 
-    const StringMatch* best = nullptr;
+    const float k = scale();
+    bool found = false;
     float bestAbsCents = maxDeviationCents + 1.0f; // sentinel > threshold
     StringMatch bestMatch{};
 
@@ -22,16 +35,25 @@ std::optional<StringMatch> StringMatcher::match(float frequency,
         const StringTarget& s = profile_->strings[i];
         if (s.frequency <= 0.0f) continue;
 
-        const float cents = 1200.0f * std::log2(frequency / s.frequency);
-        const float absCents = std::fabs(cents);
+        // The notated string, plus its octave partner when the course has one.
+        const float base = s.frequency * k;
+        const float candidates[2] = {
+            base,
+            s.octaveOffset == 0 ? 0.0f : base * std::pow(2.0f, static_cast<float>(s.octaveOffset)),
+        };
 
-        if (absCents < bestAbsCents) {
-            bestAbsCents  = absCents;
-            bestMatch     = {s.name, s.stringNumber, s.frequency, cents};
-            best          = &bestMatch;
+        for (float target : candidates) {
+            if (target <= 0.0f) continue;
+            const float cents = 1200.0f * std::log2(frequency / target);
+            const float absCents = std::fabs(cents);
+            if (absCents < bestAbsCents) {
+                bestAbsCents = absCents;
+                bestMatch    = {s.name, s.stringNumber, target, cents};
+                found        = true;
+            }
         }
     }
 
-    if (!best || bestAbsCents > maxDeviationCents) return std::nullopt;
+    if (!found || bestAbsCents > maxDeviationCents) return std::nullopt;
     return bestMatch;
 }

@@ -106,6 +106,8 @@ const { start, stop, latest, isRunning, error } = useTuner({
   minFrequency?: number;        // 60 Hz
   maxFrequency?: number;        // 1200 Hz
   instrument?: Instrument;      // 'chromatic'
+  tuning?: TuningPreset | '';   // instrument default; '' disables string matching
+  tuningTranspose?: number;     // 0 semitones — shifts string targets (e.g. +5 for a cura)
   a4?: number;                  // 440 Hz
 
   // DSP tuning
@@ -154,6 +156,8 @@ type PitchEvent = {
   noteName: string;   // e.g. "A"
   octave: number;
   cents: number;      // −50 to +50 relative to equal temperament
+  nearestString: string;   // nearest open string of the active tuning, e.g. "E2" ("" when none)
+  stringDeviation: number; // cents from that string's target, negative = flat
 };
 
 type TunerConfig = {
@@ -172,7 +176,9 @@ type TunerConfig = {
 
 type Instrument =
   | 'guitar' | 'bass' | 'violin' | 'viola' | 'cello'
-  | 'ukulele' | 'mandolin' | 'banjo' | 'chromatic';
+  | 'ukulele' | 'mandolin' | 'banjo'
+  | 'oud' | 'cumbus' | 'baglama' | 'bouzouki'
+  | 'chromatic';
 
 type Temperament = 'equal' | 'just';
 ```
@@ -182,9 +188,29 @@ type Temperament = 'equal' | 'just';
 ```typescript
 TunerEngine.setA4(hz: number): void          // default 440
 TunerEngine.setInstrument(name: Instrument): void
+TunerEngine.setTuning(name: TuningPreset | ''): void
+TunerEngine.setTuningTranspose(semitones: number): void // shift string targets, e.g. +5 for a cura
 TunerEngine.setTemperament(name: Temperament): void
 TunerEngine.getStatus(): { isRunning: boolean; engineReady: boolean }
 ```
+
+### Tuning presets
+
+Every instrument except mandolin, banjo and chromatic activates a default tuning so `PitchEvent.nearestString` / `stringDeviation` point at the open string being tuned. `TUNING_PROFILES` exports the same table the C++ core matches against (names, frequencies at A4 = 440, and which courses carry an octave string), so an app can draw its strings from the engine instead of keeping a copy.
+
+```typescript
+import { TUNING_PROFILES, getTuningsForInstrument, resolveTuningStrings } from 'react-native-tuner-engine';
+
+getTuningsForInstrument('oud').map((p) => p.id);
+// ['oud_turkish', 'oud_turkish_d', 'oud_arabic', 'oud_arabic_old', 'oud_arabic_high']
+
+// A cura is a bağlama tuned a fourth up: same düzen, transposed.
+TunerEngine.setInstrument('baglama');
+TunerEngine.setTuningTranspose(5);
+resolveTuningStrings('baglama_kara', { transpose: 5 }); // the Hz the engine now matches
+```
+
+Bağlama and bouzouki courses that carry an octave string (`octaveOffset: ±1`) are matched at either octave, so the detector locking onto the thin or the wound string of a pair still lands on the right course.
 
 For the full API reference (all config options, quality presets, adaptive frame size, overlap ratio), see **[documents/API.md](documents/API.md)**.
 
@@ -200,6 +226,7 @@ The shared C++ core (`cpp/`) compiles as a static library on both platforms.
 | — primary | `PyinPitchDetector` | Probabilistic YIN (Beta-distributed threshold prior, per-candidate probability mass) |
 | — corroborator | `CepstrumPitchDetector` | Real cepstrum via radix-2 FFT; peak-vs-rival prominence confidence |
 | Note mapping | `NoteMapper` | Hz → MIDI, note name, octave, cents deviation |
+| String matching | `StringMatcher` | Nearest open string of the active tuning preset; scaled by A4 and transpose, octave-paired courses matched at either octave |
 | SNR estimation | `SnrEstimator` | Signal RMS vs. a noise floor learned from every frame (fast fall, slow rise); full confidence weight from 12 dB SNR |
 | Post-processing | `PostProcessor` | Median-5 filter, EMA smoothing (configurable), note-transition hysteresis (configurable) |
 | Dispatch | `AudioFrameDispatcher` | SPSC lock-free queue, dedicated worker thread |

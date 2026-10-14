@@ -16,6 +16,7 @@ typedef void (^PitchEventCallback)(NSDictionary* event);
 - (void)setA4:(float)hz;
 - (void)setInstrument:(NSString *)name;
 - (void)setTuning:(NSString *)name;
+- (void)setTuningTranspose:(float)semitones;
 - (void)setTemperament:(NSString *)name;
 - (NSDictionary *)getStatus;
 
