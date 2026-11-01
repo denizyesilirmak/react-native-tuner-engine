@@ -62,6 +62,13 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
         nativeSetAdaptiveFrameSize(opts.getBoolean("adaptiveFrameSize"))
       }
 
+      if (opts?.hasKey("spectrumEnabled") == true && opts.getBoolean("spectrumEnabled")) {
+        val bands = if (opts.hasKey("spectrumBands")) opts.getInt("spectrumBands") else 64
+        val minHz = if (opts.hasKey("spectrumMinHz")) opts.getDouble("spectrumMinHz").toFloat() else 50.0f
+        val maxHz = if (opts.hasKey("spectrumMaxHz")) opts.getDouble("spectrumMaxHz").toFloat() else 4000.0f
+        nativeSetSpectrum(true, bands, minHz, maxHz)
+      }
+
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("CONFIGURE_ERROR", "configure failed: ${e.message}", e)
@@ -98,6 +105,10 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
 
   override fun setTuning(name: String) {
     nativeSetTuning(name)
+  }
+
+  override fun setTuningTranspose(semitones: Double) {
+    nativeSetTuningTranspose(semitones.toFloat())
   }
 
   override fun setTemperament(name: String) {
@@ -211,11 +222,13 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetA4(hz: Float)
   private external fun nativeSetInstrument(name: String)
   private external fun nativeSetTuning(name: String)
+  private external fun nativeSetTuningTranspose(semitones: Float)
   private external fun nativeSetHpfCutoff(hz: Float)
   private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
   private external fun nativeSetOnsetDetection(enabled: Boolean)
   private external fun nativeSetTemperament(name: String)
   private external fun nativeSetAdaptiveFrameSize(enabled: Boolean)
+  private external fun nativeSetSpectrum(enabled: Boolean, bands: Int, minHz: Float, maxHz: Float)
   private external fun nativeIsRunning(): Boolean
 
   companion object {

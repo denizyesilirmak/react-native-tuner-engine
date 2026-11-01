@@ -3,6 +3,7 @@
 #include "PitchResult.hpp"
 #include "PostProcessor.hpp"
 #include "RingBuffer.hpp"
+#include "SpectrumAnalyzer.hpp"
 #include "TunerEngine.hpp"
 
 #include <algorithm>
@@ -23,6 +24,8 @@
 class AudioFrameDispatcher {
 public:
     using PitchCallback = std::function<void(const PitchResult&)>;
+    // Band levels in dBFS, low to high. The pointer is only valid during the call.
+    using SpectrumCallback = std::function<void(const float* bands, int count)>;
 
     // frameSize: samples per processing frame (e.g. 2048)
     // sampleRate: initial sample rate — can change via setSampleRate()
@@ -48,12 +51,19 @@ public:
     void setFrequencyRange(float minHz, float maxHz);
     void setInstrument(const std::string& name);
     void setTuning(const std::string& name);
+    void setTuningTranspose(float semitones);
     void setTemperament(const std::string& name);
     void setAdaptiveFrameSize(bool enabled);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
+
+    // Spectrum output for display. Off until enabled; costs one FFT per frame.
+    // Set the callback before start() — it is invoked from the worker thread.
+    void setSpectrumCallback(SpectrumCallback callback);
+    void setSpectrumEnabled(bool enabled);
+    void setSpectrumConfig(SpectrumAnalyzer::Config cfg);
 
     // Set overlap ratio (0.0–0.75). Recomputes hop size. Thread-safe.
     void setOverlapRatio(float ratio);
@@ -69,6 +79,8 @@ private:
     void workerLoop();
     void recomputeHopSize();
     void applyStoredSettings(); // re-apply cached settings after engine recreation
+    void rebuildSpectrumLocked(); // engineMutex_ held
+    void processFrameLocked(PitchResult& result); // engineMutex_ held
 
     static constexpr unsigned kRingCapacity = 32768u; // ~680ms at 48kHz — plenty of headroom
 
@@ -89,6 +101,7 @@ private:
     // Cached settings — re-applied after engine recreation (setSampleRate / reconfigure)
     std::string currentInstrument_;
     std::string currentTuning_;
+    float currentTuningTranspose_{0.0f};
     std::string currentTemperament_;
     float currentA4_{440.0f};
     float currentNoiseGateDb_{-70.0f};
@@ -98,6 +111,11 @@ private:
     float currentHpfCutoff_{70.0f};
     bool currentOnsetEnabled_{false};
     PostProcessor::Config currentPostCfg_{};
+
+    SpectrumCallback spectrumCallback_;
+    bool spectrumEnabled_{false};
+    SpectrumAnalyzer::Config spectrumCfg_{};
+    std::unique_ptr<SpectrumAnalyzer> spectrum_; // null while disabled
 
     std::thread workerThread_;
     std::atomic<bool> running_{false};

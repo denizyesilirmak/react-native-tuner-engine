@@ -7,6 +7,10 @@ export const INSTRUMENTS = [
   'ukulele',
   'mandolin',
   'banjo',
+  'oud',
+  'cumbus',
+  'baglama',
+  'bouzouki',
   'chromatic',
 ] as const;
 export type Instrument = (typeof INSTRUMENTS)[number];
@@ -21,6 +25,19 @@ export type Temperament = (typeof TEMPERAMENTS)[number];
  * - high-accuracy: frameSize=4096, overlap=0.75 — best for bass/cello, ~21ms update rate
  */
 export type QualityPreset = 'low-latency' | 'balanced' | 'high-accuracy';
+
+/**
+ * Log-spaced band levels for a spectrum display. Delivered through
+ * `TunerEngine.onSpectrum` (New Architecture only).
+ */
+export type SpectrumConfig = {
+  /** Number of bands (2–512). Default: 64 */
+  bands?: number;
+  /** Centre of the lowest band in Hz. Default: 50 */
+  minFrequency?: number;
+  /** Centre of the highest band in Hz. Default: 4000 */
+  maxFrequency?: number;
+};
 
 export type TunerConfig = {
   /** Audio sample rate in Hz. Default: 48000 */
@@ -79,6 +96,11 @@ export type TunerConfig = {
    * Overrides individual frameSize/overlapRatio if provided.
    */
   quality?: QualityPreset;
+  /**
+   * Emit a spectrum frame alongside every pitch frame. `true` uses the
+   * defaults. Costs one extra FFT per frame. Default: off
+   */
+  spectrum?: boolean | SpectrumConfig;
 };
 
 export const TUNING_PRESETS = [
@@ -97,8 +119,47 @@ export const TUNING_PRESETS = [
   'viola_standard',
   'cello_standard',
   'ukulele_standard',
+  'oud_turkish',
+  'oud_turkish_d',
+  'oud_arabic',
+  'oud_arabic_old',
+  'oud_arabic_high',
+  'cumbus_standard',
+  'baglama_kara',
+  'baglama_baglama',
+  'baglama_misket',
+  'baglama_mustezat',
+  'baglama_abdal',
+  'baglama_fidayda',
+  'bouzouki_tetrachordo',
+  'bouzouki_trichordo',
+  'bouzouki_irish',
 ] as const;
 export type TuningPreset = (typeof TUNING_PRESETS)[number];
+
+/**
+ * One string or course of a tuning preset, as the C++ core matches it.
+ */
+export type TuningString = {
+  /** Notated open-string name at A4 = 440, e.g. "E2". */
+  name: string;
+  /** 1-based, thickest/lowest first — the order the engine reports. */
+  stringNumber: number;
+  /** Open-string frequency in Hz at A4 = 440 and no transpose. */
+  frequency: number;
+  /**
+   * Octave-paired course: the course also carries a string one octave above
+   * (+1) or below (-1). The engine matches either octave to this course.
+   * 0 for a unison course.
+   */
+  octaveOffset: -1 | 0 | 1;
+};
+
+export type TuningProfile = {
+  id: TuningPreset;
+  instrument: Instrument;
+  strings: TuningString[];
+};
 
 export type PitchEvent = {
   hasPitch: boolean;

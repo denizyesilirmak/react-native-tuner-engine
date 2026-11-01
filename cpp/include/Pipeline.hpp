@@ -36,6 +36,7 @@ public:
     void setFrequencyRange(float minHz, float maxHz);
     void setInstrument(const std::string& name);
     void setTuning(const std::string& name);   // e.g. "guitar_standard", "" to disable
+    void setTuningTranspose(float semitones);  // shift string targets, e.g. +5 for a cura
     void setTemperament(const std::string& name); // "equal" or "just"
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);

@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import TunerEngine from './TunerEngine';
-import type { Instrument, PitchEvent, TunerConfig } from './types';
+import type {
+  Instrument,
+  PitchEvent,
+  TunerConfig,
+  TuningPreset,
+} from './types';
 
 type UseTunerOptions = TunerConfig & {
   instrument?: Instrument;
   a4?: number;
+  /** Overrides the instrument's default tuning. `''` disables string matching. */
+  tuning?: TuningPreset | '';
+  /** Shifts the tuning's string targets by this many semitones. */
+  tuningTranspose?: number;
 };
 
 type UseTunerResult = {
@@ -40,10 +49,15 @@ export function useTuner(opts: UseTunerOptions = {}): UseTunerResult {
         throw new Error('Microphone permission denied');
       }
 
-      const { instrument, a4, ...config } = optsRef.current;
+      const { instrument, a4, tuning, tuningTranspose, ...config } =
+        optsRef.current;
       await TunerEngine.configure(config);
 
       if (instrument) TunerEngine.setInstrument(instrument);
+      if (tuning !== undefined) TunerEngine.setTuning(tuning);
+      if (tuningTranspose !== undefined) {
+        TunerEngine.setTuningTranspose(tuningTranspose);
+      }
       if (a4 !== undefined) TunerEngine.setA4(a4);
 
       unsubscribeRef.current = TunerEngine.onPitch(setLatest);

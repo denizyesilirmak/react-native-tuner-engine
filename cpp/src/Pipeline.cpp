@@ -109,6 +109,7 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
 
 void Pipeline::setA4(float hz) {
     noteMapper_.setA4(hz);
+    stringMatcher_.setA4(hz);
 }
 
 void Pipeline::setNoiseGateDb(float db) {
@@ -132,6 +133,10 @@ void Pipeline::setInstrument(const std::string& name) {
 
 void Pipeline::setTuning(const std::string& name) {
     stringMatcher_.setTuning(name.empty() ? nullptr : tuningPreset(name));
+}
+
+void Pipeline::setTuningTranspose(float semitones) {
+    stringMatcher_.setTranspose(semitones);
 }
 
 void Pipeline::setTemperament(const std::string& name) {

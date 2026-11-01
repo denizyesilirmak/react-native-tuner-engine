@@ -12,6 +12,8 @@ import type {
 } from './types';
 
 type PitchCallback = (event: PitchEvent) => void;
+/** Band levels in dBFS, lowest band first. */
+type SpectrumCallback = (bands: number[]) => void;
 type Unsubscribe = () => void;
 
 const QUALITY_PRESETS: Record<
@@ -25,8 +27,17 @@ const QUALITY_PRESETS: Record<
 
 class TunerEngine {
   configure(opts: TunerConfig): Promise<void> {
-    const { quality, adaptiveFrameSize, ...rest } = opts;
-    const resolved = { ...rest };
+    const { quality, adaptiveFrameSize, spectrum, ...rest } = opts;
+    const resolved: Record<string, unknown> & TunerConfig = { ...rest };
+
+    // Flattened for the native side, which reads plain keys.
+    if (spectrum) {
+      const cfg = spectrum === true ? {} : spectrum;
+      resolved.spectrumEnabled = true;
+      if (cfg.bands !== undefined) resolved.spectrumBands = cfg.bands;
+      if (cfg.minFrequency !== undefined) resolved.spectrumMinHz = cfg.minFrequency;
+      if (cfg.maxFrequency !== undefined) resolved.spectrumMaxHz = cfg.maxFrequency;
+    }
 
     // quality preset overrides frameSize and overlapRatio
     if (quality && QUALITY_PRESETS[quality]) {
@@ -90,8 +101,38 @@ class TunerEngine {
     NativeTunerEngine.setTuning(name);
   }
 
+  /**
+   * Shifts every string target of the active tuning by `semitones`
+   * (fractional allowed). Use it for instruments whose notated tuning floats
+   * with the player or the instrument size — a cura reads as a bağlama
+   * tuned +5, a Si-karar short-neck as +2. Persists across setTuning() and
+   * setInstrument(); pass 0 to clear.
+   */
+  setTuningTranspose(semitones: number): void {
+    if (!Number.isFinite(semitones)) {
+      if (__DEV__)
+        console.warn(`[TunerEngine] Invalid transpose: "${semitones}"`);
+      return;
+    }
+    NativeTunerEngine.setTuningTranspose(semitones);
+  }
+
   getStatus(): EngineStatus {
     return NativeTunerEngine.getStatus() as unknown as EngineStatus;
+  }
+
+  /**
+   * Receives a spectrum frame per processed frame once `configure()` was
+   * called with `spectrum` enabled. JSI only — silent on the old architecture.
+   * One subscriber at a time; a new one replaces the previous.
+   */
+  onSpectrum(callback: SpectrumCallback): Unsubscribe {
+    (globalThis as any).__tunerEngineOnSpectrum = callback;
+    return () => {
+      if ((globalThis as any).__tunerEngineOnSpectrum === callback) {
+        (globalThis as any).__tunerEngineOnSpectrum = undefined;
+      }
+    };
   }
 
   onPitch(callback: PitchCallback): Unsubscribe {

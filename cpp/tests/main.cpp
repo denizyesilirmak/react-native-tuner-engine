@@ -8,6 +8,9 @@
 #include "AudioFrameDispatcher.hpp"
 #include "InstrumentPresets.hpp"
 #include "SnrEstimator.hpp"
+#include "SpectrumAnalyzer.hpp"
+#include "StringMatcher.hpp"
+#include "TuningPresets.hpp"
 
 #include <cassert>
 #include <cstdio>
@@ -1066,6 +1069,245 @@ static void testPyinRealStringNoOctaveUp() {
     }
 }
 
+// --- 1.5: Eastern instruments, octave courses, transpose ---
+
+static void testTuningPresetLookup() {
+    const char* ids[] = {
+        "oud_turkish", "oud_turkish_d", "oud_arabic", "oud_arabic_old", "oud_arabic_high",
+        "cumbus_standard",
+        "baglama_kara", "baglama_baglama", "baglama_misket", "baglama_mustezat",
+        "baglama_abdal", "baglama_fidayda",
+        "bouzouki_tetrachordo", "bouzouki_trichordo", "bouzouki_irish",
+    };
+    for (const char* id : ids) {
+        const TuningProfile* p = tuningPreset(id);
+        assert(p != nullptr);
+        assert(std::string(p->name) == id);
+        assert(p->stringCount > 0 && p->stringCount <= 8);
+        for (int i = 0; i < p->stringCount; ++i) {
+            assert(p->strings[i].stringNumber == i + 1);
+            assert(p->strings[i].frequency > 0.0f);
+        }
+    }
+    // Existing presets keep unison courses (octaveOffset defaults to 0).
+    const TuningProfile* g = tuningPreset("guitar_standard");
+    for (int i = 0; i < g->stringCount; ++i) assert(g->strings[i].octaveOffset == 0);
+
+    assert(defaultTuningForInstrument("oud") == "oud_turkish");
+    assert(defaultTuningForInstrument("cumbus") == "cumbus_standard");
+    assert(defaultTuningForInstrument("baglama") == "baglama_kara");
+    assert(defaultTuningForInstrument("bouzouki") == "bouzouki_tetrachordo");
+    assert(defaultTuningForInstrument("mandolin") == "");
+    std::cout << "tuning preset lookup ok\n";
+}
+
+static void testInstrumentPresetRanges() {
+    const FrequencyRange oud = instrumentPreset("oud");
+    assert(oud.minHz <= 65.0f && oud.maxHz >= 1100.0f);
+    assert(instrumentRecommendedFrameSize("oud") == 4096);
+    const FrequencyRange bag = instrumentPreset("baglama");
+    assert(bag.minHz <= 110.0f && bag.maxHz >= 1500.0f);
+    assert(instrumentRecommendedFrameSize("baglama") == 2048);
+    assert(instrumentRecommendedFrameSize("bouzouki") == 2048);
+    assert(instrumentRecommendedFrameSize("cumbus") == 2048);
+    // Unknown names still fall back to chromatic.
+    const FrequencyRange unknown = instrumentPreset("theremin");
+    assert(unknown.minHz == 60.0f && unknown.maxHz == 1200.0f);
+    std::cout << "instrument preset ranges ok\n";
+}
+
+static void testStringMatcherUnisonUnchanged() {
+    StringMatcher m;
+    m.setTuning(tuningPreset("guitar_standard"));
+    auto r = m.match(84.0f);
+    assert(r.has_value());
+    assert(std::string(r->name) == "E2");
+    assert(r->stringNumber == 1);
+    assertNear(r->targetHz, 82.41f, 0.01f);
+    // E3 (164.8 Hz) is an octave above the low E: not a string, too far from D3/G3.
+    assert(!m.match(164.81f).has_value());
+    std::cout << "string matcher unison behaviour unchanged\n";
+}
+
+static void testStringMatcherOctaveCourse() {
+    StringMatcher m;
+    m.setTuning(tuningPreset("bouzouki_tetrachordo"));
+
+    // The thin string of the C course, an octave up: still the C course.
+    auto c4 = m.match(261.63f);
+    assert(c4.has_value());
+    assert(std::string(c4->name) == "C3");
+    assert(c4->stringNumber == 1);
+    assertNear(c4->targetHz, 261.62f, 0.05f);
+    assertNear(c4->deviationCents, 0.0f, 0.5f);
+
+    // The wound string, as notated.
+    auto c3 = m.match(130.81f);
+    assert(c3.has_value() && c3->stringNumber == 1);
+    assertNear(c3->targetHz, 130.81f, 0.01f);
+
+    // Octave DOWN is not offered for a +1 course: C2 matches nothing.
+    assert(!m.match(65.41f).has_value());
+
+    // Unison treble course: A4 is not the A3 course.
+    assert(!m.match(440.0f).has_value());
+
+    // Bağlama alt course carries a bam string an octave below: A2 → alt.
+    m.setTuning(tuningPreset("baglama_kara"));
+    auto a2 = m.match(110.0f);
+    assert(a2.has_value());
+    assert(std::string(a2->name) == "A3" && a2->stringNumber == 3);
+    assertNear(a2->targetHz, 110.0f, 0.01f);
+    // Orta course has the plain string an octave up: D4 → orta.
+    auto d4 = m.match(293.66f);
+    assert(d4.has_value() && d4->stringNumber == 2);
+    // Üst course is unison: G4 matches nothing.
+    assert(!m.match(392.0f).has_value());
+    std::cout << "string matcher octave courses ok\n";
+}
+
+static void testStringMatcherTransposeAndA4() {
+    StringMatcher m;
+    m.setTuning(tuningPreset("baglama_kara"));
+
+    // A cura is the same düzen a fourth up: alt A3 → D4.
+    m.setTranspose(5.0f);
+    auto alt = m.match(293.66f);
+    assert(alt.has_value());
+    assert(std::string(alt->name) == "A3" && alt->stringNumber == 3);
+    assertNear(alt->deviationCents, 0.0f, 0.5f);
+    // Its octave string moves with it: D3 → alt as well.
+    auto altLow = m.match(146.83f);
+    assert(altLow.has_value() && altLow->stringNumber == 3);
+    // Untransposed A3 is now 500 ¢ away from everything: no match.
+    assert(!m.match(220.0f).has_value());
+
+    // Clearing the transpose restores the notated targets.
+    m.setTranspose(0.0f);
+    assert(m.match(220.0f).has_value());
+
+    // A4 = 442 scales the targets like NoteMapper does.
+    m.setTuning(tuningPreset("guitar_standard"));
+    m.setA4(442.0f);
+    auto e4 = m.match(329.63f * 442.0f / 440.0f);
+    assert(e4.has_value());
+    assertNear(e4->deviationCents, 0.0f, 0.1f);
+    auto e4at440 = m.match(329.63f);
+    assert(e4at440.has_value());
+    assertNear(e4at440->deviationCents, -7.85f, 0.2f);
+    std::cout << "string matcher transpose and a4 ok\n";
+}
+
+static void testPipelineTransposeViaEngine() {
+    TunerEngine engine(48000.0f, 2048);
+    engine.setInstrument("baglama");
+    engine.setTuningTranspose(5.0f);
+
+    PitchResult result;
+    auto d4 = generateSine(293.66f, 48000.0f, 2048 * 8);
+    for (int f = 0; f < 8; ++f) result = engine.process(d4.data() + f * 2048, 2048);
+    assert(result.hasPitch);
+    assert(result.noteName == "D" && result.octave == 4);
+    assert(result.nearestString == "A3"); // the alt course, notated name
+    assertNear(result.stringDeviation, 0.0f, 3.0f);
+
+    // Switching tuning keeps the transpose.
+    engine.setTuning("baglama_misket");
+    for (int f = 0; f < 8; ++f) result = engine.process(d4.data() + f * 2048, 2048);
+    assert(result.nearestString == "A3");
+    std::cout << "pipeline transpose via engine ok\n";
+}
+
+static void testOudPresetDetectsBassCourse() {
+    AudioFrameDispatcher d(2048, 48000.0f, [](const PitchResult&) {});
+    d.setInstrument("oud");
+    assert(d.frameSize() == 4096); // adaptive frame size kicks in for the C#2 course
+
+    TunerEngine engine(48000.0f, 4096);
+    engine.setInstrument("oud");
+    PitchResult result;
+    auto cs2 = generateHarmonicTone(69.30f, 48000.0f, 4096 * 8);
+    for (int f = 0; f < 8; ++f) result = engine.process(cs2.data() + f * 4096, 4096);
+    assert(result.hasPitch);
+    assert(result.noteName == "C#" && result.octave == 2);
+    assert(result.nearestString == "C#2");
+    std::cout << "oud preset bass course ok\n";
+}
+
+static void testSpectrumAnalyzerSinePeak() {
+    const float sr = 48000.0f;
+    const int n = 2048;
+    SpectrumAnalyzer::Config cfg;
+    cfg.bands = 64;
+    cfg.minHz = 50.0f;
+    cfg.maxHz = 4000.0f;
+    SpectrumAnalyzer analyzer(n, sr, cfg);
+
+    for (float freq : {82.41f, 440.0f, 1760.0f}) {
+        auto sine = generateSine(freq, sr, n, 0.8f);
+        analyzer.process(sine.data(), n);
+        const auto& bands = analyzer.out();
+        assert(static_cast<int>(bands.size()) == 64);
+
+        const auto peakIt = std::max_element(bands.begin(), bands.end());
+        const int peakBand = static_cast<int>(peakIt - bands.begin());
+        const float ratio = std::pow(cfg.maxHz / cfg.minHz, 1.0f / 63.0f);
+        const float peakCentre = cfg.minHz * std::pow(ratio, static_cast<float>(peakBand));
+        // Peak lands in the band holding the tone (bands are ~1.2 semitones wide).
+        assert(std::fabs(12.0f * std::log2(peakCentre / freq)) <= 1.2f);
+        // 0.8 amplitude ≈ -1.9 dBFS; Hann scalloping costs at most ~1.5 dB more.
+        assert(*peakIt <= 0.5f && *peakIt >= -4.0f);
+        // Bands well outside the Hann main lobe (±2 bins ≈ ±47 Hz) sit far below the peak.
+        if (freq - cfg.minHz > 150.0f) assert(bands.front() < *peakIt - 40.0f);
+        assert(bands.back() < *peakIt - 40.0f);
+    }
+    std::cout << "SpectrumAnalyzer sine peak: passed\n";
+}
+
+static void testSpectrumAnalyzerSilence() {
+    SpectrumAnalyzer analyzer(2048, 48000.0f, SpectrumAnalyzer::Config{});
+    auto silence = generateSilence(2048);
+    analyzer.process(silence.data(), 2048);
+    for (float db : analyzer.out()) assertNear(db, -120.0f, 0.01f);
+    std::cout << "SpectrumAnalyzer silence: passed\n";
+}
+
+static void testDispatcherSpectrumOptIn() {
+    const float sr = 48000.0f;
+    const int n = 2048;
+    std::atomic<int> pitchFrames{0};
+    std::atomic<int> spectrumFrames{0};
+    std::atomic<int> bandCount{0};
+
+    AudioFrameDispatcher dispatcher(n, sr, [&](const PitchResult&) { ++pitchFrames; });
+    dispatcher.setSpectrumCallback([&](const float*, int count) {
+        bandCount = count;
+        ++spectrumFrames;
+    });
+
+    auto tone = generateSine(440.0f, sr, n * 4);
+    dispatcher.start();
+    dispatcher.push(tone.data(), n * 2);
+    for (int i = 0; i < 200 && pitchFrames < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    assert(pitchFrames >= 2);
+    assert(spectrumFrames == 0); // off by default
+
+    SpectrumAnalyzer::Config cfg;
+    cfg.bands = 48;
+    dispatcher.setSpectrumConfig(cfg);
+    dispatcher.setSpectrumEnabled(true);
+    dispatcher.push(tone.data(), n * 2);
+    for (int i = 0; i < 200 && spectrumFrames < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    dispatcher.stop();
+    assert(spectrumFrames >= 2);
+    assert(bandCount == 48);
+    std::cout << "Dispatcher spectrum opt-in: passed\n";
+}
+
 int main() {
     testNoteMapper();
 
@@ -1127,6 +1369,20 @@ int main() {
     testSlidingWindowOverlap();
     testDispatcherReconfigure();
     testAdaptiveFrameSizeBass();
+
+    // Spectrum output
+    testSpectrumAnalyzerSinePeak();
+    testSpectrumAnalyzerSilence();
+    testDispatcherSpectrumOptIn();
+
+    // 1.5 Eastern instruments
+    testTuningPresetLookup();
+    testInstrumentPresetRanges();
+    testStringMatcherUnisonUnchanged();
+    testStringMatcherOctaveCourse();
+    testStringMatcherTransposeAndA4();
+    testPipelineTransposeViaEngine();
+    testOudPresetDetectsBassCourse();
 
     std::cout << "all tuner engine tests passed." << std::endl;
 

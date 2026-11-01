@@ -4,6 +4,7 @@
 #include <mutex>
 #include <atomic>
 #include <string>
+#include <vector>
 #include <fbjni/fbjni.h>
 #include <jsi/jsi.h>
 #include <ReactCommon/CallInvoker.h>
@@ -131,6 +132,29 @@ static void onPitchResult(const PitchResult& r) {
     if (didAttach) gJvm->DetachCurrentThread();
 }
 
+// Called from AudioFrameDispatcher's worker thread when spectrum output is on.
+// JSI only: getStatus() carries no spectrum, so there is no Kotlin path.
+static void onSpectrumResult(const float* bands, int count) {
+    auto jsInvoker = std::atomic_load(&gJsInvoker);
+    if (!jsInvoker) return;
+
+    std::vector<double> levels(bands, bands + count);
+    jsInvoker->invokeAsync(
+        [levels = std::move(levels)](facebook::jsi::Runtime& rt) {
+            auto cb = rt.global().getProperty(rt, "__tunerEngineOnSpectrum");
+            if (!cb.isObject()) return;
+            auto fn = cb.asObject(rt);
+            if (!fn.isFunction(rt)) return;
+
+            facebook::jsi::Array arr(rt, levels.size());
+            for (size_t i = 0; i < levels.size(); ++i) {
+                arr.setValueAtIndex(rt, i, facebook::jsi::Value(levels[i]));
+            }
+            fn.asFunction(rt).call(rt, std::move(arr));
+        }
+    );
+}
+
 // Rebuilds the dispatcher. Must be called with gMutex held.
 // Correct teardown order:
 //   1. Null the atomic  → audio callback stops pushing immediately
@@ -159,6 +183,7 @@ static void initDispatcherLocked(
     gDispatcher = std::make_unique<AudioFrameDispatcher>(
         frameSize, sampleRate, onPitchResult, overlapRatio
     );
+    gDispatcher->setSpectrumCallback(onSpectrumResult);
 
     gDispatcherAtomic.store(gDispatcher.get(), std::memory_order_release);
 
@@ -333,6 +358,14 @@ Java_com_tunerengine_TunerEngineModule_nativeSetTuning(
     env->ReleaseStringUTFChars(name, nameChars);
 }
 
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetTuningTranspose(
+    JNIEnv* /*env*/, jobject /*thiz*/, jfloat semitones
+) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (gDispatcher) gDispatcher->setTuningTranspose(static_cast<float>(semitones));
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeIsRunning(
     JNIEnv* /*env*/, jobject /*thiz*/
@@ -357,6 +390,21 @@ Java_com_tunerengine_TunerEngineModule_nativeSetTemperament(
     const char* nameChars = env->GetStringUTFChars(name, nullptr);
     if (gDispatcher && nameChars) gDispatcher->setTemperament(std::string(nameChars));
     env->ReleaseStringUTFChars(name, nameChars);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetSpectrum(
+    JNIEnv* /*env*/, jobject /*thiz*/,
+    jboolean enabled, jint bands, jfloat minHz, jfloat maxHz
+) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (!gDispatcher) return;
+    SpectrumAnalyzer::Config cfg;
+    cfg.bands = static_cast<int>(bands);
+    cfg.minHz = minHz;
+    cfg.maxHz = maxHz;
+    gDispatcher->setSpectrumConfig(cfg);
+    gDispatcher->setSpectrumEnabled(static_cast<bool>(enabled));
 }
 
 JNIEXPORT void JNICALL
