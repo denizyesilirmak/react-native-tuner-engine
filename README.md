@@ -145,6 +145,21 @@ unsub();
 await TunerEngine.stop();
 ```
 
+### Spectrum
+
+Opt in with `spectrum` and subscribe with `TunerEngine.onSpectrum`. Each processed frame delivers one array of log-spaced band levels in dBFS (lowest band first; a full-scale sine reads about 0 dB, silence −120). Useful for a spectrogram or level meter. JSI only — not delivered on the old architecture.
+
+```typescript
+const tuner = useTuner({
+  instrument: 'chromatic',
+  spectrum: { bands: 64, minFrequency: 50, maxFrequency: 4000 }, // or `true` for these defaults
+});
+
+useEffect(() => TunerEngine.onSpectrum((bands) => draw(bands)), []);
+```
+
+The analyzer reads the raw frame, before the noise gate, with a zero-padded Hann FFT. Bands narrower than an FFT bin (the lowest ones at small frame sizes) are interpolated, so they look smooth but don't resolve neighbouring semitones; use `quality: 'high-accuracy'` for a sharper low end.
+
 ### Types
 
 ```typescript
@@ -172,6 +187,7 @@ type TunerConfig = {
   hysteresisFrames?: number;    // default 3    — frames to confirm a note change (1–10)
   hpfCutoffHz?: number;         // default 70   — high-pass filter cutoff in Hz (20–300)
   onsetDetection?: boolean;     // default false — resets smoothing on note attacks
+  spectrum?: boolean | SpectrumConfig; // default off — see Spectrum
 };
 
 type Instrument =
@@ -192,6 +208,7 @@ TunerEngine.setTuning(name: TuningPreset | ''): void
 TunerEngine.setTuningTranspose(semitones: number): void // shift string targets, e.g. +5 for a cura
 TunerEngine.setTemperament(name: Temperament): void
 TunerEngine.getStatus(): { isRunning: boolean; engineReady: boolean }
+TunerEngine.onSpectrum(cb: (bands: number[]) => void): () => void // needs `spectrum` in configure()
 ```
 
 ### Tuning presets

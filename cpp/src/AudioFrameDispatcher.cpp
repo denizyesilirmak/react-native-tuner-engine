@@ -52,6 +52,7 @@ void AudioFrameDispatcher::setSampleRate(float sampleRate) {
     sampleRate_ = sampleRate;
     engine_ = std::make_unique<TunerEngine>(sampleRate, frameSize_);
     applyStoredSettings();
+    rebuildSpectrumLocked();
 }
 
 void AudioFrameDispatcher::setA4(float hz) {
@@ -138,6 +139,38 @@ void AudioFrameDispatcher::setOnsetConfig(OnsetDetector::Config cfg) {
     if (engine_) engine_->setOnsetConfig(cfg);
 }
 
+void AudioFrameDispatcher::setSpectrumCallback(SpectrumCallback callback) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    spectrumCallback_ = std::move(callback);
+}
+
+void AudioFrameDispatcher::setSpectrumEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    spectrumEnabled_ = enabled;
+    rebuildSpectrumLocked();
+}
+
+void AudioFrameDispatcher::setSpectrumConfig(SpectrumAnalyzer::Config cfg) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    spectrumCfg_ = cfg;
+    rebuildSpectrumLocked();
+}
+
+void AudioFrameDispatcher::rebuildSpectrumLocked() {
+    spectrum_ = spectrumEnabled_
+        ? std::make_unique<SpectrumAnalyzer>(frameSize_, sampleRate_, spectrumCfg_)
+        : nullptr;
+}
+
+void AudioFrameDispatcher::processFrameLocked(PitchResult& result) {
+    result = engine_->process(frameBuffer_.data(), frameSize_);
+    if (spectrum_ && spectrumCallback_) {
+        spectrum_->process(frameBuffer_.data(), frameSize_);
+        const auto& bands = spectrum_->out();
+        spectrumCallback_(bands.data(), static_cast<int>(bands.size()));
+    }
+}
+
 void AudioFrameDispatcher::setOverlapRatio(float ratio) {
     std::lock_guard<std::mutex> lock(engineMutex_);
     overlapRatio_ = std::clamp(ratio, 0.0f, 0.75f);
@@ -174,6 +207,7 @@ void AudioFrameDispatcher::reconfigure(int newFrameSize, float sampleRate) {
         firstFrame_ = true;
         engine_ = std::make_unique<TunerEngine>(sampleRate_, frameSize_);
         applyStoredSettings();
+        rebuildSpectrumLocked();
     }
 
     if (wasRunning) start();
@@ -190,7 +224,7 @@ void AudioFrameDispatcher::workerLoop() {
                 PitchResult result;
                 {
                     std::lock_guard<std::mutex> lock(engineMutex_);
-                    result = engine_->process(frameBuffer_.data(), frameSize_);
+                    processFrameLocked(result);
                 }
                 if (callback_) {
                     callback_(result);
@@ -213,7 +247,7 @@ void AudioFrameDispatcher::workerLoop() {
                 PitchResult result;
                 {
                     std::lock_guard<std::mutex> lock(engineMutex_);
-                    result = engine_->process(frameBuffer_.data(), frameSize_);
+                    processFrameLocked(result);
                 }
                 if (callback_) {
                     callback_(result);

@@ -4,6 +4,7 @@
 #import <ReactCommon/RCTTurboModule.h>
 #import <ReactCommon/CallInvoker.h>
 #import <jsi/jsi.h>
+#include <vector>
 
 @implementation TunerEngine {
   TunerBridge* _tunerBridge;
@@ -139,6 +140,31 @@ RCT_EXPORT_MODULE(TunerEngine)
       obj.setProperty(rt, "stringDeviation", facebook::jsi::Value(stringDev));
 
       fn.asFunction(rt).call(rt, std::move(obj));
+    });
+  };
+
+  // Spectrum frames go out on the JSI path only; there is no old-arch fallback.
+  _tunerBridge.onSpectrum = ^(const float* bands, int count) {
+    __strong __typeof__(weakSelf) strongSelf = weakSelf;
+    if (!strongSelf) return;
+    auto jsInvoker = strongSelf->_jsInvoker;
+    if (!jsInvoker) return;
+
+    std::vector<double> levels(bands, bands + count);
+    jsInvoker->invokeAsync([weakSelf, levels = std::move(levels)](facebook::jsi::Runtime& rt) {
+      __strong __typeof__(weakSelf) innerSelf = weakSelf;
+      if (!innerSelf) return;
+
+      auto cb = rt.global().getProperty(rt, "__tunerEngineOnSpectrum");
+      if (!cb.isObject()) return;
+      auto fn = cb.asObject(rt);
+      if (!fn.isFunction(rt)) return;
+
+      facebook::jsi::Array arr(rt, levels.size());
+      for (size_t i = 0; i < levels.size(); ++i) {
+        arr.setValueAtIndex(rt, i, facebook::jsi::Value(levels[i]));
+      }
+      fn.asFunction(rt).call(rt, std::move(arr));
     });
   };
 

@@ -26,6 +26,19 @@ export type Temperament = (typeof TEMPERAMENTS)[number];
  */
 export type QualityPreset = 'low-latency' | 'balanced' | 'high-accuracy';
 
+/**
+ * Log-spaced band levels for a spectrum display. Delivered through
+ * `TunerEngine.onSpectrum` (New Architecture only).
+ */
+export type SpectrumConfig = {
+  /** Number of bands (2–512). Default: 64 */
+  bands?: number;
+  /** Centre of the lowest band in Hz. Default: 50 */
+  minFrequency?: number;
+  /** Centre of the highest band in Hz. Default: 4000 */
+  maxFrequency?: number;
+};
+
 export type TunerConfig = {
   /** Audio sample rate in Hz. Default: 48000 */
   sampleRate?: number;
@@ -83,6 +96,11 @@ export type TunerConfig = {
    * Overrides individual frameSize/overlapRatio if provided.
    */
   quality?: QualityPreset;
+  /**
+   * Emit a spectrum frame alongside every pitch frame. `true` uses the
+   * defaults. Costs one extra FFT per frame. Default: off
+   */
+  spectrum?: boolean | SpectrumConfig;
 };
 
 export const TUNING_PRESETS = [

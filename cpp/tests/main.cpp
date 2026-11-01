@@ -8,6 +8,7 @@
 #include "AudioFrameDispatcher.hpp"
 #include "InstrumentPresets.hpp"
 #include "SnrEstimator.hpp"
+#include "SpectrumAnalyzer.hpp"
 #include "StringMatcher.hpp"
 #include "TuningPresets.hpp"
 
@@ -1233,6 +1234,80 @@ static void testOudPresetDetectsBassCourse() {
     std::cout << "oud preset bass course ok\n";
 }
 
+static void testSpectrumAnalyzerSinePeak() {
+    const float sr = 48000.0f;
+    const int n = 2048;
+    SpectrumAnalyzer::Config cfg;
+    cfg.bands = 64;
+    cfg.minHz = 50.0f;
+    cfg.maxHz = 4000.0f;
+    SpectrumAnalyzer analyzer(n, sr, cfg);
+
+    for (float freq : {82.41f, 440.0f, 1760.0f}) {
+        auto sine = generateSine(freq, sr, n, 0.8f);
+        analyzer.process(sine.data(), n);
+        const auto& bands = analyzer.out();
+        assert(static_cast<int>(bands.size()) == 64);
+
+        const auto peakIt = std::max_element(bands.begin(), bands.end());
+        const int peakBand = static_cast<int>(peakIt - bands.begin());
+        const float ratio = std::pow(cfg.maxHz / cfg.minHz, 1.0f / 63.0f);
+        const float peakCentre = cfg.minHz * std::pow(ratio, static_cast<float>(peakBand));
+        // Peak lands in the band holding the tone (bands are ~1.2 semitones wide).
+        assert(std::fabs(12.0f * std::log2(peakCentre / freq)) <= 1.2f);
+        // 0.8 amplitude ≈ -1.9 dBFS; Hann scalloping costs at most ~1.5 dB more.
+        assert(*peakIt <= 0.5f && *peakIt >= -4.0f);
+        // Bands well outside the Hann main lobe (±2 bins ≈ ±47 Hz) sit far below the peak.
+        if (freq - cfg.minHz > 150.0f) assert(bands.front() < *peakIt - 40.0f);
+        assert(bands.back() < *peakIt - 40.0f);
+    }
+    std::cout << "SpectrumAnalyzer sine peak: passed\n";
+}
+
+static void testSpectrumAnalyzerSilence() {
+    SpectrumAnalyzer analyzer(2048, 48000.0f, SpectrumAnalyzer::Config{});
+    auto silence = generateSilence(2048);
+    analyzer.process(silence.data(), 2048);
+    for (float db : analyzer.out()) assertNear(db, -120.0f, 0.01f);
+    std::cout << "SpectrumAnalyzer silence: passed\n";
+}
+
+static void testDispatcherSpectrumOptIn() {
+    const float sr = 48000.0f;
+    const int n = 2048;
+    std::atomic<int> pitchFrames{0};
+    std::atomic<int> spectrumFrames{0};
+    std::atomic<int> bandCount{0};
+
+    AudioFrameDispatcher dispatcher(n, sr, [&](const PitchResult&) { ++pitchFrames; });
+    dispatcher.setSpectrumCallback([&](const float*, int count) {
+        bandCount = count;
+        ++spectrumFrames;
+    });
+
+    auto tone = generateSine(440.0f, sr, n * 4);
+    dispatcher.start();
+    dispatcher.push(tone.data(), n * 2);
+    for (int i = 0; i < 200 && pitchFrames < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    assert(pitchFrames >= 2);
+    assert(spectrumFrames == 0); // off by default
+
+    SpectrumAnalyzer::Config cfg;
+    cfg.bands = 48;
+    dispatcher.setSpectrumConfig(cfg);
+    dispatcher.setSpectrumEnabled(true);
+    dispatcher.push(tone.data(), n * 2);
+    for (int i = 0; i < 200 && spectrumFrames < 2; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    dispatcher.stop();
+    assert(spectrumFrames >= 2);
+    assert(bandCount == 48);
+    std::cout << "Dispatcher spectrum opt-in: passed\n";
+}
+
 int main() {
     testNoteMapper();
 
@@ -1294,6 +1369,11 @@ int main() {
     testSlidingWindowOverlap();
     testDispatcherReconfigure();
     testAdaptiveFrameSizeBass();
+
+    // Spectrum output
+    testSpectrumAnalyzerSinePeak();
+    testSpectrumAnalyzerSilence();
+    testDispatcherSpectrumOptIn();
 
     // 1.5 Eastern instruments
     testTuningPresetLookup();

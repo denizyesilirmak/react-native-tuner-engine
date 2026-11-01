@@ -105,6 +105,20 @@
   if (opts[@"adaptiveFrameSize"] != nil) {
     _dispatcher->setAdaptiveFrameSize([opts[@"adaptiveFrameSize"] boolValue]);
   }
+
+  _dispatcher->setSpectrumCallback([weakSelf](const float* bands, int count) {
+    __strong __typeof__(weakSelf) strongSelf = weakSelf;
+    if (!strongSelf || !strongSelf.onSpectrum) return;
+    strongSelf.onSpectrum(bands, count);
+  });
+  if ([opts[@"spectrumEnabled"] boolValue]) {
+    SpectrumAnalyzer::Config spectrumCfg;
+    if (opts[@"spectrumBands"]) spectrumCfg.bands = [opts[@"spectrumBands"] intValue];
+    if (opts[@"spectrumMinHz"]) spectrumCfg.minHz = [opts[@"spectrumMinHz"] floatValue];
+    if (opts[@"spectrumMaxHz"]) spectrumCfg.maxHz = [opts[@"spectrumMaxHz"] floatValue];
+    _dispatcher->setSpectrumConfig(spectrumCfg);
+    _dispatcher->setSpectrumEnabled(true);
+  }
 }
 
 - (void)startWithCompletion:(void(^)(NSError* _Nullable error))completion {

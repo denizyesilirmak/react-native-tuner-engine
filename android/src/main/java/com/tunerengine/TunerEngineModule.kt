@@ -62,6 +62,13 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
         nativeSetAdaptiveFrameSize(opts.getBoolean("adaptiveFrameSize"))
       }
 
+      if (opts?.hasKey("spectrumEnabled") == true && opts.getBoolean("spectrumEnabled")) {
+        val bands = if (opts.hasKey("spectrumBands")) opts.getInt("spectrumBands") else 64
+        val minHz = if (opts.hasKey("spectrumMinHz")) opts.getDouble("spectrumMinHz").toFloat() else 50.0f
+        val maxHz = if (opts.hasKey("spectrumMaxHz")) opts.getDouble("spectrumMaxHz").toFloat() else 4000.0f
+        nativeSetSpectrum(true, bands, minHz, maxHz)
+      }
+
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("CONFIGURE_ERROR", "configure failed: ${e.message}", e)
@@ -221,6 +228,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetOnsetDetection(enabled: Boolean)
   private external fun nativeSetTemperament(name: String)
   private external fun nativeSetAdaptiveFrameSize(enabled: Boolean)
+  private external fun nativeSetSpectrum(enabled: Boolean, bands: Int, minHz: Float, maxHz: Float)
   private external fun nativeIsRunning(): Boolean
 
   companion object {

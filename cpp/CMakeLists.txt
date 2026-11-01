@@ -19,6 +19,7 @@ add_library(tuner_engine_core STATIC
     src/PyinPitchDetector.cpp
     src/DetectorFusion.cpp
     src/StringMatcher.cpp
+    src/SpectrumAnalyzer.cpp
 )
 
 target_include_directories(tuner_engine_core PUBLIC include)

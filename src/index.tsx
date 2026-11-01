@@ -11,6 +11,7 @@ export type {
   Instrument,
   PitchEvent,
   QualityPreset,
+  SpectrumConfig,
   Temperament,
   TunerConfig,
   TuningPreset,
