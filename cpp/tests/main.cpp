@@ -799,6 +799,35 @@ static void testPipelineRejectsToneBuriedInNoise() {
     assert(pitched == 0);
 }
 
+static void testPipelineFloorLearnsRoomNoise() {
+    // Steady room noise over the gate. pYIN still reports a (weak) pitch for
+    // most of these frames, but they must count as noise for the floor: after
+    // ~3 s the noise itself is no longer "signal". Fails when the floor is fed
+    // the voiced flag alone (the floor creeps at the held-note rate, SNR ~19 dB).
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   frames = 150;
+
+    auto input = generateNoise(n * frames, -50.0f);
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    PitchResult r;
+    int pitched = 0;
+    for (int f = 0; f < frames; ++f) {
+        r = engine.process(input.data() + f * n, n);
+        if (r.hasPitch) ++pitched;
+    }
+
+    std::cout << "room noise @ -50 dBFS: snr after " << frames << " frames=" << r.snrDb
+              << " pitched=" << pitched << "\n";
+
+    assert(r.stage != PitchStage::Gated);
+    assert(pitched == 0);
+    assert(r.snrDb < 3.0f);
+}
+
 static void testPipelineQuietTailStillTuned() {
     // The tail of a ringing string: a G3 at -62 dBFS (13 dB over a -75 dBFS
     // room). Noise alone must stay silent, and the note must keep the needle.
@@ -1113,6 +1142,7 @@ int main() {
     testSnrEstimator();
     testPipelineDistantGuitar();
     testPipelineRejectsToneBuriedInNoise();
+    testPipelineFloorLearnsRoomNoise();
     testPipelineQuietTailStillTuned();
     testPyinMultiplesDoNotSplitConfidence();
     testPyinRealStringNoOctaveUp();
