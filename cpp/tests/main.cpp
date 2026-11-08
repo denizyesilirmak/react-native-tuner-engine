@@ -1,3 +1,7 @@
+// Every check below is an assert(). CI builds Release (-DNDEBUG), which would
+// compile them all out and let any failure pass, so keep them on regardless.
+#undef NDEBUG
+
 #include "NoteMapper.hpp"
 #include "OnsetDetector.hpp"
 #include "TunerEngine.hpp"
