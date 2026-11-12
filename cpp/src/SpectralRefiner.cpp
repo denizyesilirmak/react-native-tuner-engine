@@ -48,6 +48,11 @@ constexpr double kMaxStiffness      = 1.0e-3;
 // The partials must agree this closely (median, cents) once a stiffness is
 // applied, for that stiffness to be believed.
 constexpr double kStiffnessFitCents = 1.5;
+// Partials up to this one vote while the stiffness is unknown.
+constexpr int    kUnstretchedVoters = 6;
+// A detector estimate further than this from the measured note was too
+// rough to judge the octave by.
+constexpr double kRecentreCents     = 15.0;
 constexpr double kStiffnessSmoothing = 0.25;
 // Subharmonic check: how many multiples of the coarse estimate to look at,
 // and the share of their energy that must sit on every m-th one for the note
@@ -398,9 +403,15 @@ int SpectralRefiner::dominantMultiple(int length, double coarseHz, int samplesSi
         }
         // Enough of the sound is new for the comparison to mean something.
         if (arrivedTotal >= kMinArrivedShare * total) {
+            // Only a raise is taken from this. "Nothing higher arrived" is
+            // also what the same string plucked again looks like (its
+            // partials were there already), and says nothing about octaves.
             const int multiple = decide(arrived, arrivedTotal);
-            lastByArrival_ = multiple > 1;
-            return multiple;
+            if (multiple > 1) {
+                lastByArrival_ = true;
+                return multiple;
+            }
+            outDominance = 0.0;
         }
     }
 
@@ -444,6 +455,25 @@ float SpectralRefiner::refine(float coarseHz, int samplesSincePluck) {
         bool ok = refineWith(length, target, hz, possible >= 2 ? 2 : 1);
         if (!ok && possible >= 2) {
             ok = refineWith(length, target, hz, 1) && lastExplained_ >= kLonePartialExplained;
+        }
+        if (ok && multiple == 1 && divisor == 1
+            && std::fabs(centsBetween(hz, coarseHz)) > kRecentreCents) {
+            // The detector was a good way off (a quarter tone, on a string
+            // being damped), so the comb laid on its multiples missed the
+            // partials and the octave was never really judged. Judge it
+            // again from where the note was found.
+            double dominanceAgain = 0.0;
+            const int again = dominantMultiple(length, hz, samplesSincePluck, dominanceAgain);
+            if (again > 1) {
+                double higher = 0.0;
+                if (refineWith(length, hz * again, higher, 1)) {
+                    lastMultiple_ = again;
+                    lastDivisor_ = 1;
+                    lastDominance_ = dominanceAgain;
+                    return static_cast<float>(higher);
+                }
+                return 0.0f;
+            }
         }
         if (ok) {
             lastMultiple_ = multiple;
@@ -630,8 +660,17 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
     std::vector<Vote> votes;
     votes.reserve(used.size());
     double totalWeight = 0.0;
+    // Until the string's stiffness is known, the high partials cannot vote:
+    // each sits sharp of the series by B k^2 / 2, and on a wound G six of
+    // them at 8 to 13 cents outvoted the rest for the first two frames.
+    int lowVoters = 0;
+    for (const auto& p : used) {
+        if (p.k <= kUnstretchedVoters) ++lowVoters;
+    }
+    const bool lowOnly = !trustedStiffness && !haveStiffness_ && lowVoters >= 2;
     for (size_t i = 0; i < used.size(); ++i) {
         const auto& p = used[i];
+        if (lowOnly && p.k > kUnstretchedVoters) continue;
         // A vote, not a measure of loudness. On a phone the fundamental of
         // a B3 stood 20 dB over its second and third partials and sat 10
         // cents over them for half a second after the pluck (the guitar's
