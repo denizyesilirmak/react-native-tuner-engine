@@ -202,7 +202,9 @@
 - (NSDictionary *)getStatus {
   std::lock_guard<std::mutex> lock(_statusMutex);
   return @{
-    @"isRunning":       @(_isRunning),
+    // False once capture has died under a tuner the caller still thinks is
+    // running (an interruption that never resumed, a failed restart).
+    @"isRunning":       @(_isRunning && (_audioSource == nil || [_audioSource isAlive])),
     @"engineReady":     @(_dispatcher != nullptr),
     @"seq":             @(_seq),
     @"hasPitch":        @(_latestHasPitch),

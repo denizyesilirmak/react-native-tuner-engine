@@ -35,7 +35,9 @@ constexpr float kNearPerfectDepth = 0.03f;
 constexpr float kRepairDepthMargin = 0.01f;
 
 // Local minima within this fraction of the winner's lag belong to the same
-// dip (about two thirds of a semitone either side).
+// dip (about two thirds of a semitone either side). Wider than
+// isMultipleOf()'s 3 %, so the confidence below counts the whole dip
+// explicitly: the minimum that held the mass must keep supporting the winner.
 constexpr float kSameDipFraction = 0.04f;
 
 // True when `lag` is (within 3 %) an integer multiple, 1..8, of `base`.
@@ -206,11 +208,12 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
     // +7 cents at 14 dB SNR, +28 at 10 dB; bass E1 +17 and +47). The mass has
     // done its job of choosing the dip; the reading comes from its deepest
     // point.
+    const int dipCentre = winner->lag;
+    const int dipRadius = std::max(2, static_cast<int>(kSameDipFraction * static_cast<float>(winner->lag)));
     {
-        const int radius = std::max(2, static_cast<int>(kSameDipFraction * static_cast<float>(winner->lag)));
         const PitchCandidate* deepestInDip = winner;
         for (const auto& candidate : candidates_) {
-            if (std::abs(candidate.lag - winner->lag) > radius) continue;
+            if (std::abs(candidate.lag - dipCentre) > dipRadius) continue;
             if (candidate.cmndDepth < deepestInDip->cmndDepth) deepestInDip = &candidate;
         }
         winner = deepestInDip;
@@ -230,7 +233,10 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
     float familyMass = 0.0f;
     for (const auto& candidate : candidates_) {
         totalMass += candidate.probability;
-        if (isMultipleOf(candidate.lag, winner->lag)) familyMass += candidate.probability;
+        if (isMultipleOf(candidate.lag, winner->lag)
+            || std::abs(candidate.lag - dipCentre) <= dipRadius) {
+            familyMass += candidate.probability;
+        }
     }
     const float winnerMassShare = totalMass > 0.0f ? familyMass / totalMass : 0.0f;
     const float periodicity     = std::max(0.0f, 1.0f - winner->cmndDepth);

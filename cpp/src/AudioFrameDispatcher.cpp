@@ -32,6 +32,18 @@ void AudioFrameDispatcher::recomputeHopSize() {
 void AudioFrameDispatcher::start() {
     if (running_.exchange(true)) return; // already running
     firstFrame_ = true;
+    // Drop whatever the previous run left behind: the worker stops before the
+    // audio source does, so the ring can still hold the end of the last
+    // session, and the first frame would be read from it.
+    {
+        float discard[512];
+        int left = ring_.available();
+        while (left > 0) {
+            const int n = std::min(left, 512);
+            if (ring_.pop(discard, n) == 0) break;
+            left -= n;
+        }
+    }
     workerThread_ = std::thread(&AudioFrameDispatcher::workerLoop, this);
 }
 

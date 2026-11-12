@@ -7,6 +7,7 @@
   float _sampleRate;
   BOOL _isRunning;
   BOOL _interrupted; // stopped by an interruption, to resume when it ends
+  BOOL _sessionHeld; // the shared session is ours to hand back
 }
 
 - (instancetype)init {
@@ -26,6 +27,12 @@
 
 - (float)sampleRate {
   return _sampleRate;
+}
+
+- (BOOL)isAlive {
+  @synchronized (self) {
+    return _isRunning || _interrupted;
+  }
 }
 
 // start/stop come from the module's queue while the session notifications
@@ -54,6 +61,8 @@
     if (error) *error = sessionError;
     return NO;
   }
+  // From here the category is changed: every way out hands it back.
+  _sessionHeld = YES;
 
   // iOS mutes haptics and system sounds while a record-capable session is
   // active unless opted in, which silenced the host app's in-tune feedback.
@@ -83,6 +92,7 @@
   [session setActive:YES error:&sessionError];
   if (sessionError) {
     if (error) *error = sessionError;
+    [self releaseSessionLocked];
     return NO;
   }
 
@@ -102,6 +112,7 @@
     }
     _engine = nil;
     _inputNode = nil;
+    [self releaseSessionLocked];
     return NO;
   }
   _sampleRate = (float)hwRate;
@@ -138,6 +149,8 @@
     if (error) *error = engineError;
     [_inputNode removeTapOnBus:0];
     _engine = nil;
+    _inputNode = nil;
+    [self releaseSessionLocked];
     return NO;
   }
 
@@ -162,36 +175,50 @@
 
 // releaseSession NO: a restart follows at once, so the session stays as it is.
 - (void)stopLockedReleasingSession:(BOOL)releaseSession {
-  if (!_isRunning) return;
-  _isRunning = NO;
+  if (_isRunning) {
+    _isRunning = NO;
 
-  [[NSNotificationCenter defaultCenter]
-    removeObserver:self
-              name:AVAudioEngineConfigurationChangeNotification
-            object:nil];
+    [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:AVAudioEngineConfigurationChangeNotification
+              object:nil];
 
-  if (_inputNode) {
-    [_inputNode removeTapOnBus:0];
+    if (_inputNode) {
+      [_inputNode removeTapOnBus:0];
+    }
+    if (_engine && _engine.isRunning) {
+      [_engine stop];
+    }
+    _engine = nil;
+    _inputNode = nil;
   }
-  if (_engine && _engine.isRunning) {
-    [_engine stop];
-  }
-  _engine = nil;
-  _inputNode = nil;
 
-  if (!releaseSession) return;
+  // Not gated on _isRunning: an interruption or a failed restart has already
+  // stopped the engine by the time the caller's stop arrives, and the session
+  // is still ours to hand back.
+  if (releaseSession) [self releaseSessionLocked];
+}
+
+// Hands the shared session back as a plain, mixable playback one. Left on
+// PlayAndRecord + Measurement, whatever the host app plays next without
+// setting its own category inherits the record route and the unprocessed,
+// quieter output.
+- (void)releaseSessionLocked {
+  if (!_sessionHeld) return;
+  _sessionHeld = NO;
 
   AVAudioSession* session = [AVAudioSession sharedInstance];
   [session setActive:NO
          withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                error:nil];
-  // Hand the session back as a plain playback one. Left on PlayAndRecord +
-  // Measurement, whatever the host app plays next without setting its own
-  // category inherits the record route and the unprocessed, quieter output.
   [session setCategory:AVAudioSessionCategoryPlayback
                   mode:AVAudioSessionModeDefault
-               options:0
+               options:AVAudioSessionCategoryOptionMixWithOthers
                  error:nil];
+  // Active again, and mixable so other apps keep playing. On iOS 17 a session
+  // left deactivated with NotifyOthers stops the next AVAudioEngine in the
+  // same app from bringing its I/O up.
+  [session setActive:YES error:nil];
 }
 
 // Stop and start again on the current route, picking up its sample rate.

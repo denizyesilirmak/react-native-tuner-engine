@@ -17,6 +17,9 @@ typedef void (^AudioSamplesCallback)(const float* samples, int count, float samp
 - (BOOL)startWithError:(NSError **)error;
 - (void)stop;
 - (float)sampleRate;
+// NO once capture has ended for good without stop being called: an
+// interruption that did not resume, or a restart that failed.
+- (BOOL)isAlive;
 
 @end
 
