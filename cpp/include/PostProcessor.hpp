@@ -33,6 +33,8 @@ public:
     void setConfig(Config cfg);
     // Reference pitch the note boundaries are measured against. Default 440.
     void setA4(float hz);
+    // How fast the note is moving, cents per frame.
+    float trendCents() const { return trendCents_; }
 
 private:
     Config cfg_;
@@ -50,6 +52,7 @@ private:
     // How fast the note is moving, cents per frame (a peg being turned).
     float trendCents_ = 0.0f;
     float lastError_ = 0.0f;
+    bool  leading_ = false;
 
     // Hysteresis state
     int  lockedMidi_     = -1;

@@ -18,6 +18,7 @@ static constexpr float kHumMemorySeconds = 30.0f;
 // this many attempts.
 static constexpr float kConfirmCents = 3.0f;
 static constexpr int   kConfirmMaxTries = 3;
+static constexpr float kConfirmLooseCents = 15.0f;
 // A tone this much of the sound, from a detector this sure, needs no second
 // measurement when no pluck is near.
 static constexpr float kPlainExplained = 0.95f;
@@ -159,7 +160,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         // The pluck fell somewhere in this frame; count from its start.
         samplesSincePluck_ = frameSize_;
     } else if (samplesSincePluck_ >= 0 && samplesSincePluck_ < (1 << 28)) {
-        samplesSincePluck_ += frameSize_;
+        // (By the new samples: with overlapping frames that is not a frame.)
+        samplesSincePluck_ += (newSamples > 0 && newSamples < frameSize_) ? newSamples : frameSize_;
     }
 
     if (humFrames_ > 0) --humFrames_;
@@ -470,7 +472,16 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         const bool agrees = unconfirmedHz_ > 0.0f && unconfirmedAt_ == frameIndex_ - 1
             && std::fabs(1200.0f * std::log2(measuredHz / unconfirmedHz_)) <= kConfirmCents;
         // After a pluck the wait is bounded; with none there is no hurry.
-        if (!agrees && (!afterPluck || unconfirmedTries_ < kConfirmMaxTries)) {
+        // When it runs out the note is shown without the close agreement (a
+        // hard pluck glides more than that from frame to frame), but it must
+        // at least be the note the frame before measured: a banjo's B came
+        // out as the octave above and the note itself on alternate frames,
+        // and the third try was shown whichever it was.
+        const bool sameNote = unconfirmedHz_ > 0.0f && unconfirmedAt_ == frameIndex_ - 1
+            && std::fabs(1200.0f * std::log2(measuredHz / unconfirmedHz_)) <= kConfirmLooseCents;
+        const bool waited = afterPluck && unconfirmedTries_ >= kConfirmMaxTries
+            && (sameNote || unconfirmedTries_ >= 2 * kConfirmMaxTries);
+        if (!agrees && !waited) {
             unconfirmedHz_ = measuredHz;
             unconfirmedAt_ = frameIndex_;
             ++unconfirmedTries_;

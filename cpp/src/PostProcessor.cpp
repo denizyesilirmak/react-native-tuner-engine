@@ -14,6 +14,9 @@ static constexpr float kTrendGain     = 0.25f;
 static constexpr float kTrendMinCents = 0.7f;
 static constexpr float kTrendFade     = 0.5f;
 static constexpr float kTrendMaxCents = 15.0f;
+// How far ahead of the smoothed value the reading is carried, in frames of
+// trend. One made a fast turn 6 cents behind instead of 8.5; two overshot.
+static constexpr float kLeadFrames    = 1.0f;
 
 PostProcessor::PostProcessor() : cfg_{} {}
 PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
@@ -148,14 +151,22 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence, 
             ? std::clamp(trendCents_ + kTrendGain * error, -kTrendMaxCents, kTrendMaxCents)
             : trendCents_ * kTrendFade;
         lastError_ = error;
+        leading_ = sameWay;
     } else {
         smoothedFreq_ = alpha * med + (1.0f - alpha) * smoothedFreq_;
     }
 
-    const float cents = freqToCentsFromMidi(smoothedFreq_, lockedMidi_);
+    // What was measured is the note as it was about half a measuring window
+    // ago. While it moves, the reading is carried forward by that much; the
+    // moment the errors stop agreeing it is not, or the reading would run on
+    // past where the peg stopped.
+    const float shown = measured
+        ? smoothedFreq_ * std::pow(2.0f, (leading_ ? kLeadFrames * trendCents_ : 0.0f) / 1200.0f)
+        : smoothedFreq_;
+    const float cents = freqToCentsFromMidi(shown, lockedMidi_);
 
     return Result{
-        smoothedFreq_,
+        shown,
         lockedMidi_,
         cents,
         true

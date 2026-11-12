@@ -1454,7 +1454,7 @@ static void testTurningPegIsFollowed() {
     }
     TunerEngine engine(48000.0f, n);
     engine.setInstrument("guitar");
-    double worstMoving = 0.0, worstAfter = 0.0;
+    double worstMoving = 0.0, worstAfter = 0.0, worstSettled = 0.0;
     int after = 0;
     for (size_t p = 0; p + n <= input.size(); p += n) {
         const auto r = engine.process(input.data() + p, n);
@@ -1463,12 +1463,16 @@ static void testTurningPegIsFollowed() {
         const double error = std::fabs(1200.0 * std::log2(r.frequency / f0) - truth[p + n - 1]);
         if (t <= turnAt + turnFor + 0.2) worstMoving = std::max(worstMoving, error);
         else if (t <= turnAt + turnFor + 1.2) { worstAfter = std::max(worstAfter, error); ++after; }
+        if (t > turnAt + turnFor + 0.5) worstSettled = std::max(worstSettled, error);
     }
     std::cout << "peg turned 30 cents in 0.5 s: worst " << worstMoving << " cents behind while moving, "
-              << worstAfter << " after it stopped\n";
+              << worstAfter << " after it stopped, " << worstSettled << " half a second later\n";
     assert(after > 15);
-    assert(worstMoving < 11.0);
-    assert(worstAfter < 1.0);
+    // Carried forward by its trend the reading runs a little past where
+    // the peg stopped, for a frame or two.
+    assert(worstMoving < 8.0);
+    assert(worstAfter < 2.0);
+    assert(worstSettled < 0.5);
 }
 
 static void testMainsHumIsNotANote() {
