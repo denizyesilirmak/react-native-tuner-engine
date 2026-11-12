@@ -16,7 +16,7 @@ static constexpr float kHumNoPluckSeconds = 1.0f;
 static constexpr float kHumMemorySeconds = 30.0f;
 // A new note's first two measurements must agree this closely, for at most
 // this many attempts.
-static constexpr float kConfirmCents = 3.0f;
+static constexpr float kConfirmCents = 2.0f;
 static constexpr int   kConfirmMaxTries = 3;
 static constexpr float kConfirmLooseCents = 15.0f;
 // A tone this much of the sound, from a detector this sure, needs no second

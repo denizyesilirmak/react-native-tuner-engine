@@ -14,6 +14,7 @@ static constexpr float kTrendGain     = 0.25f;
 static constexpr float kTrendMinCents = 0.7f;
 static constexpr float kTrendFade     = 0.5f;
 static constexpr float kTrendMaxCents = 15.0f;
+static constexpr float kFaintTrendMaxCents = 3.0f;
 // How far ahead of the smoothed value the reading is carried, in frames of
 // trend. One made a fast turn 6 cents behind instead of 8.5; two overshot.
 static constexpr float kLeadFrames    = 1.0f;
@@ -145,10 +146,13 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence, 
         const float adaptive = kSteadyAlpha
             + (alpha - kSteadyAlpha) * std::min(1.0f, std::fabs(error) / kFastStepCents);
         smoothedFreq_ = predicted * std::pow(2.0f, adaptive * error / 1200.0f);
+        // A faint note's errors are mostly noise, and noise can agree with
+        // itself for a few frames: its trend is kept to what a peg does.
+        const float trendLimit = alpha < kSteadyAlpha ? kFaintTrendMaxCents : kTrendMaxCents;
         const bool sameWay = (error > 0.0f) == (lastError_ > 0.0f)
             && std::fabs(error) >= kTrendMinCents && std::fabs(lastError_) >= kTrendMinCents;
         trendCents_ = sameWay
-            ? std::clamp(trendCents_ + kTrendGain * error, -kTrendMaxCents, kTrendMaxCents)
+            ? std::clamp(trendCents_ + kTrendGain * error, -trendLimit, trendLimit)
             : trendCents_ * kTrendFade;
         lastError_ = error;
         leading_ = sameWay;
