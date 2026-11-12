@@ -3,10 +3,17 @@
 #include "AudioFrameDispatcher.hpp"
 #include "PostProcessor.hpp"
 #include <memory>
+#include <mutex>
 
 @implementation TunerBridge {
   IosAudioSource* _audioSource;
   std::unique_ptr<AudioFrameDispatcher> _dispatcher;
+  // Guards _dispatcher against the audio tap, which pushes into it while
+  // configure() may be replacing it.
+  std::mutex _dispatcherMutex;
+  float _dispatcherSampleRate; // rate the dispatcher was last told
+  // Guards the _latest* snapshot: written on the worker, read by getStatus().
+  std::mutex _statusMutex;
   bool _isRunning;
   uint64_t _seq;
   bool _latestHasPitch;
@@ -24,6 +31,7 @@
   self = [super init];
   if (self) {
     _isRunning = false;
+    _dispatcherSampleRate = 0;
     _seq = 0;
     _latestHasPitch = false;
     _latestFrequency = 0;
@@ -46,7 +54,9 @@
   [self buildDispatcherWithSampleRate:sampleRate frameSize:frameSize overlapRatio:overlapRatio opts:opts];
 
   if (_isRunning && _dispatcher && _audioSource) {
-    _dispatcher->setSampleRate(_audioSource.sampleRate);
+    std::lock_guard<std::mutex> lock(_dispatcherMutex);
+    _dispatcherSampleRate = _audioSource.sampleRate;
+    _dispatcher->setSampleRate(_dispatcherSampleRate);
     _dispatcher->start();
   }
 }
@@ -54,11 +64,12 @@
 - (void)buildDispatcherWithSampleRate:(float)sr frameSize:(int)fs overlapRatio:(float)overlap opts:(NSDictionary*)opts {
   __weak __typeof__(self) weakSelf = self;
 
-  _dispatcher = std::make_unique<AudioFrameDispatcher>(fs, sr,
+  auto dispatcher = std::make_unique<AudioFrameDispatcher>(fs, sr,
     [weakSelf](const PitchResult& r) {
       __strong __typeof__(weakSelf) strongSelf = weakSelf;
       if (!strongSelf || !strongSelf.onPitch) return;
 
+      std::unique_lock<std::mutex> statusLock(strongSelf->_statusMutex);
       strongSelf->_seq++;
       strongSelf->_latestHasPitch = r.hasPitch;
       strongSelf->_latestFrequency = r.frequency;
@@ -69,6 +80,7 @@
       strongSelf->_latestCents = r.cents;
       strongSelf->_latestNearestString = @(r.nearestString.c_str());
       strongSelf->_latestStringDeviation = r.stringDeviation;
+      statusLock.unlock();
 
       NSDictionary* event = @{
         @"hasPitch":         @(r.hasPitch),
@@ -85,6 +97,14 @@
     },
     overlap
   );
+
+  {
+    // The old dispatcher (and its worker) is destroyed outside the lock.
+    std::lock_guard<std::mutex> lock(_dispatcherMutex);
+    _dispatcher.swap(dispatcher);
+    _dispatcherSampleRate = sr;
+  }
+  dispatcher.reset();
 
   if (opts[@"noiseGateDb"])       _dispatcher->setNoiseGateDb([opts[@"noiseGateDb"] floatValue]);
   if (opts[@"confidenceThreshold"]) _dispatcher->setConfidenceThreshold([opts[@"confidenceThreshold"] floatValue]);
@@ -123,7 +143,16 @@
   __weak __typeof__(self) weakSelf = self;
   _audioSource.onSamples = ^(const float* samples, int count, float sampleRate) {
     __strong __typeof__(weakSelf) strongSelf = weakSelf;
-    if (!strongSelf || !strongSelf->_dispatcher) return;
+    if (!strongSelf) return;
+    std::lock_guard<std::mutex> lock(strongSelf->_dispatcherMutex);
+    if (!strongSelf->_dispatcher) return;
+    // The source restarts itself on a route change (headset in or out) and
+    // may come back at another rate; without this every pitch reads off by
+    // the ratio of the two rates.
+    if (sampleRate > 0 && sampleRate != strongSelf->_dispatcherSampleRate) {
+      strongSelf->_dispatcherSampleRate = sampleRate;
+      strongSelf->_dispatcher->setSampleRate(sampleRate);
+    }
     strongSelf->_dispatcher->push(samples, count);
   };
 
@@ -134,8 +163,11 @@
   }
 
   // Sync dispatcher sample rate to what AVAudioSession actually gave us
-  const float actualSampleRate = _audioSource.sampleRate;
-  _dispatcher->setSampleRate(actualSampleRate);
+  {
+    std::lock_guard<std::mutex> lock(_dispatcherMutex);
+    _dispatcherSampleRate = _audioSource.sampleRate;
+    _dispatcher->setSampleRate(_dispatcherSampleRate);
+  }
   _dispatcher->start();
   _isRunning = true;
 
@@ -168,6 +200,7 @@
 }
 
 - (NSDictionary *)getStatus {
+  std::lock_guard<std::mutex> lock(_statusMutex);
   return @{
     @"isRunning":       @(_isRunning),
     @"engineReady":     @(_dispatcher != nullptr),
