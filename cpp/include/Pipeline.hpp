@@ -61,6 +61,14 @@ private:
     std::unique_ptr<IPitchDetector> detector_;
     SnrEstimator snr_;
     OnsetDetector onsetDetector_;
+    // Tells a fresh pluck from a note that is only ringing on: the level of
+    // the last few frames, and how long since the last pluck.
+    static constexpr int kPluckHistory = 6;
+    float recentDb_[kPluckHistory] = {};
+    int   recentCount_ = 0;
+    int   recentIndex_ = 0;
+    int   framesSincePluck_ = 1 << 20;
+    bool  detectPluck(float rmsDb);
     PostProcessor postProcessor_;
     SpectralRefiner refiner_;
     bool refine_ = true;
@@ -69,6 +77,12 @@ private:
     // followed; 0 = not known yet. A stiff string's period estimate sits a
     // few cents above its fundamental by a nearly constant amount.
     float fineOverCoarse_ = 0.0f;
+    // The note last followed, kept after its partials could no longer be
+    // measured, until the next pluck: what is left of it may not come back
+    // as a new note an octave or a twelfth away.
+    float fadedHz_ = 0.0f;
+    // Samples since the level last jumped; -1 before the first pluck.
+    int samplesSincePluck_ = -1;
     float minHz_ = 60.0f;   // the detector's range, to hold corrections to
     float maxHz_ = 1200.0f;
     NoteMapper noteMapper_;

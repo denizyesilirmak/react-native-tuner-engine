@@ -3,6 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
+// Smoothing of measured readings: this slow while the note barely moves,
+// the caller's rate once a step reaches kFastStepCents.
+static constexpr float kSteadyAlpha   = 0.12f;
+static constexpr float kFastStepCents = 6.0f;
+
 PostProcessor::PostProcessor() : cfg_{} {}
 PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
     cfg_.emaAlpha = std::clamp(cfg_.emaAlpha, 0.01f, 1.0f);
@@ -110,9 +115,18 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence, 
     const float med = (!measured && medianFill_ == kMedianLen) ? median5() : frequency;
 
     // 3. EMA for a steady display within the note.
-    smoothedFreq_ = (smoothedFreq_ <= 0.0f)
-        ? med
-        : alpha * med + (1.0f - alpha) * smoothedFreq_;
+    if (smoothedFreq_ <= 0.0f) {
+        smoothedFreq_ = med;
+    } else if (measured) {
+        // A ringing string wanders by a cent or two and the display should
+        // not; a peg being turned moves it by many and the display must keep
+        // up. Slow for small steps, fast for large ones.
+        const float step = std::fabs(1200.0f * std::log2(med / smoothedFreq_));
+        const float adaptive = kSteadyAlpha + (alpha - kSteadyAlpha) * std::min(1.0f, step / kFastStepCents);
+        smoothedFreq_ = adaptive * med + (1.0f - adaptive) * smoothedFreq_;
+    } else {
+        smoothedFreq_ = alpha * med + (1.0f - alpha) * smoothedFreq_;
+    }
 
     const float cents = freqToCentsFromMidi(smoothedFreq_, lockedMidi_);
 

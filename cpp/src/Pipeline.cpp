@@ -9,6 +9,27 @@ static constexpr float kRefineGraceSeconds = 0.25f;
 // A subharmonic correction is only believed when the corrected note's
 // partials make up most of the sound.
 static constexpr float kMinExplained = 0.6f;
+// How far past the edge of the instrument's range a measured note may sit
+// (about 50 cents).
+static constexpr float kRangeSlack = 0.97f;
+// A rise in level this large over the recent envelope is a fresh pluck.
+static constexpr float kPluckRiseDb = 6.0f;
+// Frames after a pluck in which another is not looked for (the attack itself
+// keeps rising for a frame or two).
+static constexpr int kPluckCooldownFrames = 3;
+// How far a followed note may move between two frames (a peg being turned).
+static constexpr float kFollowCents = 50.0f;
+// A followed note's partials must still account for this share of the window;
+// under it the reading is noise with the note's name on it.
+static constexpr float kMinFollowExplained = 0.25f;
+
+// True when `hz` is a simple multiple or fraction of `base` (an octave, a
+// twelfth, two octaves... within about 50 cents). The same note is not.
+static bool isHarmonicOf(float hz, float base) {
+    const float ratio = hz > base ? hz / base : base / hz;
+    const float nearest = std::round(ratio);
+    return nearest >= 2.0f && nearest <= 6.0f && std::fabs(ratio - nearest) <= 0.03f * nearest;
+}
 
 Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector)
     : frameSize_(frameSize)
@@ -19,6 +40,24 @@ Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetect
     , refiner_(sampleRate)
     , workBuffer_(static_cast<size_t>(frameSize))
 {}
+
+// A pluck: the level stands kPluckRiseDb over the quietest of the last few
+// frames. Compared with real past levels, not an envelope that has to climb
+// from nothing: that one "heard" a pluck every few frames for the first
+// second after the microphone opened, and its cooldown then hid a real one.
+bool Pipeline::detectPluck(float rmsDb) {
+    bool plucked = false;
+    if (recentCount_ >= 3 && framesSincePluck_ >= kPluckCooldownFrames) {
+        float quietest = recentDb_[0];
+        for (int i = 1; i < recentCount_; ++i) quietest = std::min(quietest, recentDb_[i]);
+        plucked = rmsDb - quietest >= kPluckRiseDb;
+    }
+    recentDb_[recentIndex_] = rmsDb;
+    recentIndex_ = (recentIndex_ + 1) % kPluckHistory;
+    if (recentCount_ < kPluckHistory) ++recentCount_;
+    framesSincePluck_ = plucked ? 0 : std::min(framesSincePluck_ + 1, 1 << 20);
+    return plucked;
+}
 
 PitchResult Pipeline::process(const float* input, int frameCount, int newSamples) {
     if (!input || frameCount < frameSize_) return PitchResult{};
@@ -42,6 +81,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // --- RMS gate ---
     const float rmsLinear = calculateRmsLinear(input, frameSize_);
     const float rmsDb     = 20.0f * std::log10(std::max(rmsLinear, kMinLinear));
+    // Every frame, silent ones too: the pluck is a rise over what came before.
+    const bool plucked = detectPluck(rmsDb);
 
     if (rmsDb < noiseGateDb_) {
         // Gated frames are the best view of the room's noise floor.
@@ -60,6 +101,16 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         postProcessor_.reset();
         clearHold();
     }
+    // A fresh pluck ends whatever was being followed: the detector decides
+    // anew which string it is.
+    if (plucked) {
+        resetTracking();
+        fadedHz_ = 0.0f;
+        // The pluck fell somewhere in this frame; count from its start.
+        samplesSincePluck_ = frameSize_;
+    } else if (samplesSincePluck_ >= 0 && samplesSincePluck_ < (1 << 28)) {
+        samplesSincePluck_ += frameSize_;
+    }
 
     // --- Pitch detection ---
     DetectorResult det = detector_->detect(workBuffer_.data(), frameSize_, sampleRate_);
@@ -69,16 +120,71 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     const float snrWeight = SnrEstimator::snrToWeight(snrDb);
     float weightedConf = det.confidence * snrWeight;
 
-    // --- Measure the note from its partials ---
-    // The detector has said which note; its partials say exactly where it is,
-    // and whether the detector answered with a subharmonic of it.
+    // --- The note already being followed comes first ---
+    // A ringing string keeps its pitch; what changes is which of its partials
+    // is loudest. Asked again every frame, the period detector follows that:
+    // a low E whose second partial outlasts its fundamental became an E3
+    // after four seconds, a B3 fading into the room's rumble became a B1.
+    // So until a fresh pluck, the note in hand is measured where it is, and
+    // the detector is only consulted once its partials are gone.
     float measuredHz = det.frequency;
     bool refinedReading = false;
-    if (refine_ && det.voiced && det.frequency > 0.0f) {
-        const float refined = refiner_.refine(det.frequency);
+    bool followed = false;
+    if (refine_ && heldFrequency_ > 0.0f) {
+        const float kept = refiner_.refineKnown(heldFrequency_);
+        if (kept > 0.0f
+            && refiner_.lastExplained() >= kMinFollowExplained
+            && std::fabs(1200.0f * std::log2(kept / heldFrequency_)) <= kFollowCents) {
+            measuredHz = kept;
+            refinedReading = true;
+            followed = true;
+            weightedConf = std::max(weightedConf, confidenceThreshold_);
+        } else {
+            fadedHz_ = heldFrequency_;
+        }
+    }
+
+    // --- Otherwise: measure the note the detector names ---
+    // Its partials say exactly where it is, and whether the detector
+    // answered with a subharmonic of it.
+    if (!followed && refine_ && det.voiced && det.frequency > 0.0f) {
+        const float refined = refiner_.refine(det.frequency, samplesSincePluck_);
+        if (refined > 0.0f && (refined < minHz_ * kRangeSlack || refined > maxHz_ / kRangeSlack)) {
+            // The partials led outside the instrument's range: whatever
+            // that is (hum at the low edge, a harmonic above the top), it is
+            // not one of its notes.
+            PitchResult nopit;
+            nopit.rmsDb = rmsDb;
+            nopit.stage = PitchStage::Unvoiced;
+            nopit.detectorConfidence = det.confidence;
+            nopit.snrDb = snrDb;
+            registerMiss();
+            return nopit;
+        }
+        if (refined > 0.0f && fadedHz_ > 0.0f && isHarmonicOf(refined, fadedHz_)) {
+            // What is left of the note that just faded (its second partial
+            // outlives the rest), not a new note: nobody has plucked.
+            PitchResult nopit;
+            nopit.rmsDb = rmsDb;
+            nopit.stage = PitchStage::Unvoiced;
+            nopit.detectorConfidence = det.confidence;
+            nopit.snrDb = snrDb;
+            registerMiss();
+            return nopit;
+        }
         if (refined > 0.0f) {
             measuredHz = refined;
             refinedReading = true;
+            if (refiner_.lastPartialCount() >= 2 && refiner_.lastExplained() >= kMinExplained) {
+                // The detector proposes, the spectrum confirms. A low string
+                // whose second partial dwarfs its fundamental leaves the
+                // period detector torn between two octaves and unsure of
+                // either (confidence 0.2 to 0.5), while its partials form a
+                // clean series that is nearly all of the sound. That series
+                // is the evidence; the detector's doubt is not.
+                weightedConf = std::max(
+                    weightedConf, static_cast<float>(refiner_.lastExplained()) * snrWeight);
+            }
             if (refiner_.lastMultiple() > 1) {
                 if (refined > maxHz_ || refiner_.lastExplained() < kMinExplained) {
                     // A correction to a note outside the instrument's range,
@@ -109,7 +215,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         held = std::fabs(cents) <= noteHold_.maxCents;
     }
 
-    if (!held && (!det.voiced || weightedConf < confidenceThreshold_)) {
+    if (!followed && !held && (!det.voiced || weightedConf < confidenceThreshold_)) {
         registerMiss();
         PitchResult nopit;
         nopit.rmsDb = rmsDb;
@@ -122,7 +228,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     if (refine_) {
         if (refinedReading) {
             unrefinedFrames_ = 0;
-            if (refiner_.lastMultiple() == 1) {
+            if (!followed && refiner_.lastMultiple() == 1 && refiner_.lastDivisor() == 1) {
                 const float ratio = measuredHz / det.frequency;
                 fineOverCoarse_ = fineOverCoarse_ > 0.0f
                     ? 0.7f * fineOverCoarse_ + 0.3f * ratio
@@ -251,6 +357,7 @@ void Pipeline::registerMiss() {
 }
 
 void Pipeline::resetTracking() {
+    if (heldFrequency_ > 0.0f) fadedHz_ = heldFrequency_;
     postProcessor_.reset();
     refiner_.resetString();
     unrefinedFrames_ = 0;

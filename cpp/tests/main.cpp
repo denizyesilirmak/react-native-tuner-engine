@@ -973,7 +973,11 @@ static void testNoteHoldKeepsDecayingNote() {
     std::cout << "note hold, decaying G3: pitched frames hold=" << withHold
               << " no hold=" << withoutHold << " (wrong note " << wrongOn << ")\n";
 
-    assert(withHold > withoutHold);
+    // A note in hand is now followed by its partials for as long as they
+    // can be measured, with or without the hold, so the hold no longer adds
+    // frames here. It must not lose any.
+    assert(withHold >= withoutHold);
+    assert(withHold >= 34);
     assert(wrongOn == 0);
 }
 
@@ -1391,6 +1395,47 @@ static void testWeakFundamentalIsNotReadAnOctaveUp() {
     assert(std::fabs(stats.meanCents) < 0.3);
 }
 
+static void testRingingLowStringStaysItself() {
+    // A low E as a phone hears it: the second partial 14 dB over the
+    // fundamental and outlasting it, in a room with low rumble. Asked afresh
+    // every frame, the period detector turned it into an E3 after a few
+    // seconds, and a fading B3 into a B1. A note in hand is followed by its
+    // own partials until the next pluck.
+    constexpr double sr = 48000.0;
+    constexpr int    n  = 2048;
+    const int total = static_cast<int>(sr * 7.0), start = static_cast<int>(sr * 1.0);
+    std::vector<float> input = generateNoise(total, -62.0f);
+    // rumble: slow random walk, strong under 200 Hz
+    {
+        auto white = generateNoise(total, -30.0f, 0xBEEFu);
+        double low = 0.0;
+        for (int i = 0; i < total; ++i) { low = 0.995 * low + 0.005 * white[i]; input[i] += static_cast<float>(4.0 * low); }
+    }
+    const double f0 = 82.407;
+    const double amplitude[6] = {0.2, 1.0, 0.08, 0.03, 0.09, 0.04};
+    const double decay[6]     = {0.9, 0.35, 0.5, 0.7, 0.8, 0.9};
+    for (int k = 1; k <= 6; ++k) {
+        const double step = 2.0 * 3.14159265358979323846 * k * f0 * std::sqrt(1.0 + 1.0e-4 * k * k) / sr;
+        for (int i = start; i < total; ++i) {
+            const double t = (i - start) / sr;
+            input[i] += static_cast<float>(0.2 * amplitude[k - 1] * std::exp(-decay[k - 1] * t) * std::sin(step * (i - start) + 0.3 * k));
+        }
+    }
+
+    TunerEngine engine(48000.0f, n);
+    engine.setFrequencyRange(55.0f, 1320.0f);
+    engine.setHpfCutoff(45.0f);
+    int right = 0, wrong = 0;
+    for (int p = 0; p + n <= total; p += n) {
+        auto r = engine.process(input.data() + p, n);
+        if (!r.hasPitch) continue;
+        if (r.noteName == "E" && r.octave == 2) ++right; else ++wrong;
+    }
+    std::cout << "ringing low E, dominant 2nd partial, in rumble: E2 " << right << " frames, other notes " << wrong << "\n";
+    assert(right > 60);
+    assert(wrong == 0);
+}
+
 int main() {
     testNoteMapper();
 
@@ -1458,6 +1503,7 @@ int main() {
     testRingingNeighbourDoesNotMoveTheReading();
     testNoteOverRingingFourthIsRead();
     testWeakFundamentalIsNotReadAnOctaveUp();
+    testRingingLowStringStaysItself();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();

@@ -51,6 +51,31 @@ constexpr double kMinDominance      = 0.8;
 // A partial counts as sounding from this fraction of the strongest one's
 // amplitude (about -30 dB).
 constexpr double kPresentFraction   = 0.03;
+// ...and it must stand this far above what lies between the partials. In a
+// noisy room a decayed note leaves every bin above 3 % of its strongest
+// partial, and noise then passed for a fundamental: a ringing B3 was read as
+// B1, a G3 as C2, on a phone recording.
+constexpr double kNoiseFactor       = 3.0;
+// Where beside a peak its surroundings are sampled, in bins: just past the
+// Hann main lobe (2 bins).
+constexpr double kSideBins          = 2.5;
+// Octave-below test: a partial half way between the multiples of the coarse
+// note counts from this fraction of the strongest partial.
+constexpr double kHalfwayFraction   = 0.10;
+// ...or from this much smaller fraction when it can be shown to have arrived
+// with the pluck.
+constexpr double kHalfwayFractionNew = 0.02;
+// Looking back before the pluck: window length, the margin kept clear of the
+// pluck itself, and how much of a partial's level counts as "already there".
+constexpr int    kBeforePluckLength = 4096;
+constexpr int    kPluckMargin       = 512;
+constexpr double kAlreadyThereFraction = 0.5;
+// The partials that arrived with the pluck must hold this share of the
+// energy before they alone decide which note was plucked.
+constexpr double kMinArrivedShare   = 0.2;
+// A single partial with no series is a note only if it accounts for this
+// share of the window's energy.
+constexpr double kLonePartialExplained = 0.8;
 
 double centsBetween(double a, double b) { return 1200.0 * std::log2(a / b); }
 
@@ -141,6 +166,104 @@ bool SpectralRefiner::hasHistoryFor(float coarseHz) const {
     return filled_ >= shortest + shortest / kHopDivisor;
 }
 
+double SpectralRefiner::magnitudeAt(int length, double hz) const {
+    const double omega = 2.0 * kPi * hz / sampleRate_;
+    const double stepRe = std::cos(omega), stepIm = -std::sin(omega);
+    const std::vector<double>& window = windowFor(length);
+    const float* newer = history_.data() + (history_.size() - static_cast<size_t>(length));
+    double phRe = 1.0, phIm = 0.0, re = 0.0, im = 0.0;
+    for (int n = 0; n < length; ++n) {
+        const double v = window[static_cast<size_t>(n)] * newer[n];
+        re += v * phRe; im += v * phIm;
+        const double nextRe = phRe * stepRe - phIm * stepIm;
+        phIm = phRe * stepIm + phIm * stepRe;
+        phRe = nextRe;
+    }
+    return std::hypot(re, im);
+}
+
+// Room noise is not flat: on a phone in an ordinary room the bins under
+// 200 Hz sit only about 20 dB under a plucked string while those above 1 kHz
+// are 40 dB down. One noise figure for the whole spectrum let low rumble pass
+// for a fundamental (a ringing B3 was read as B1, its "fundamental" at 62 Hz
+// being rumble). So each peak is compared with its own surroundings, just
+// outside its main lobe and no further than half way to the next partial.
+bool SpectralRefiner::standsOut(int length, double hz, double magnitude, double spacingHz) const {
+    const double binHz = static_cast<double>(sampleRate_) / length;
+    const double offset = std::min(kSideBins * binHz, 0.5 * spacingHz);
+    double beside = magnitudeAt(length, hz + offset);
+    if (hz - offset > 20.0) beside = std::max(beside, magnitudeAt(length, hz - offset));
+    return magnitude >= kNoiseFactor * beside;
+}
+
+double SpectralRefiner::magnitudeBefore(int length, double hz, int endOffset) const {
+    const int capacity = static_cast<int>(history_.size());
+    if (endOffset < 0 || length + endOffset > std::min(capacity, filled_)) return -1.0;
+    const double omega = 2.0 * kPi * hz / sampleRate_;
+    const double stepRe = std::cos(omega), stepIm = -std::sin(omega);
+    const std::vector<double>& window = windowFor(length);
+    const float* from = history_.data() + (capacity - endOffset - length);
+    double phRe = 1.0, phIm = 0.0, re = 0.0, im = 0.0;
+    for (int n = 0; n < length; ++n) {
+        const double v = window[static_cast<size_t>(n)] * from[n];
+        re += v * phRe; im += v * phIm;
+        const double nextRe = phRe * stepRe - phIm * stepIm;
+        phIm = phRe * stepIm + phIm * stepRe;
+        phRe = nextRe;
+    }
+    return std::hypot(re, im);
+}
+
+// A low string on a phone: the second partial stands 14 to 24 dB over the
+// fundamental and everything else, so the period detector may call the note
+// an octave up from the first frame. The third and fifth partials are there,
+// half way between the multiples of that octave, where a real note an octave
+// up has nothing.
+//
+// But so do other strings: over a ringing low E and B, a plucked E4 has
+// E2's second partial at half its frequency and B3's at one and a half, a
+// perfect series for an E3 nobody played. What tells them apart is time. The
+// partials of the plucked string appeared with the pluck; the others were
+// already there. So while the moment before the pluck is still in the
+// history, a half-way partial counts only if it was not there then, and it
+// may be weak. Later, with nothing to compare against, it has to be strong.
+bool SpectralRefiner::soundsAnOctaveBelow(int length, double hz, int samplesSincePluck) const {
+    const double topHz = std::min(kMaxPartialHz, 0.45 * sampleRate_);
+    double strongest = 0.0;
+    for (int k = 1; k <= 6; ++k) {
+        if (k * hz > topHz) break;
+        double measured = 0.0, magnitude = 0.0, steadiness = 0.0;
+        if (measure(length, k * hz, measured, magnitude, steadiness)) strongest = std::max(strongest, magnitude);
+    }
+    if (strongest <= 0.0) return false;
+
+    // The stretch just before the pluck, if the history still holds it.
+    const int beforeLength = std::min(length, kBeforePluckLength);
+    const int beforeOffset = samplesSincePluck >= 0 ? samplesSincePluck + kPluckMargin : -1;
+    const bool canCompare = beforeOffset >= 0
+        && magnitudeBefore(beforeLength, hz, beforeOffset) >= 0.0;
+    const double needed = (canCompare ? kHalfwayFractionNew : kHalfwayFraction) * strongest;
+    // Window lengths differ, and so do the magnitudes they give for one tone.
+    const double scale = static_cast<double>(length) / beforeLength;
+
+    int halfway = 0;
+    for (double multiple : {0.5, 1.5, 2.5, 3.5}) {
+        const double at = multiple * hz;
+        if (at > topHz) break;
+        double measured = 0.0, magnitude = 0.0, steadiness = 0.0;
+        if (!measure(length, at, measured, magnitude, steadiness)) continue;
+        if (magnitude < needed || steadiness < kMinSteadiness
+            || std::fabs(measured - at) > 0.015 * at
+            || !standsOut(length, at, magnitude, 0.5 * hz)) continue;
+        if (canCompare) {
+            const double before = magnitudeBefore(beforeLength, measured, beforeOffset) * scale;
+            if (before >= kAlreadyThereFraction * magnitude) continue; // another string's
+        }
+        ++halfway;
+    }
+    return halfway >= 2;
+}
+
 // A period detector answers with the period of the whole sound. Two strings
 // a fourth apart (E4 over a ringing B3) repeat together at the period of E2,
 // so it says E2, with little conviction, and the frame is thrown away.
@@ -154,10 +277,11 @@ bool SpectralRefiner::hasHistoryFor(float coarseHz) const {
 // stronger than its fundamental (a nylon E4 here puts over 90 % on the even
 // ones); judged by energy it would be read an octave up. Its fundamental is
 // weak but there, and that is what keeps it where it is.
-int SpectralRefiner::dominantMultiple(int length, double coarseHz, double& outDominance) const {
+int SpectralRefiner::dominantMultiple(int length, double coarseHz, int samplesSincePluck,
+                                      double& outDominance) const {
     outDominance = 0.0;
     const double topHz = std::min(kMaxPartialHz, 0.45 * sampleRate_);
-    double magnitudeAt[kCombPartials + 1] = {0.0};
+    double combMagnitude[kCombPartials + 1] = {0.0};
     double total = 0.0, strongest = 0.0;
     int count = 0;
     for (int k = 1; k <= kCombPartials; ++k) {
@@ -165,7 +289,7 @@ int SpectralRefiner::dominantMultiple(int length, double coarseHz, double& outDo
         if (hz > topHz) break;
         double measured = 0.0, magnitude = 0.0, steadiness = 0.0;
         if (!measure(length, hz, measured, magnitude, steadiness)) continue;
-        magnitudeAt[k] = magnitude;
+        combMagnitude[k] = magnitude;
         total += magnitude * magnitude;
         strongest = std::max(strongest, magnitude);
         count = k;
@@ -173,12 +297,50 @@ int SpectralRefiner::dominantMultiple(int length, double coarseHz, double& outDo
     if (total <= 0.0 || count < 4) return 1;
 
     const double present = kPresentFraction * strongest;
-    if (magnitudeAt[1] >= present) return 1; // the coarse note itself is sounding
+
+    // Just after a pluck, with the moment before it still in the history:
+    // go by what the pluck brought. Over a low E still ringing, a plucked E4
+    // adds energy only at every fourth multiple of E2; the rest was there
+    // already and belongs to the old string, fundamental included.
+    const int beforeLength = std::min(length, kBeforePluckLength);
+    const int beforeOffset = samplesSincePluck >= 0 ? samplesSincePluck + kPluckMargin : -1;
+    if (beforeOffset >= 0 && magnitudeBefore(beforeLength, coarseHz, beforeOffset) >= 0.0) {
+        const double scale = static_cast<double>(length) / beforeLength;
+        double arrived[kCombPartials + 1] = {0.0};
+        double arrivedTotal = 0.0;
+        for (int k = 1; k <= count; ++k) {
+            if (combMagnitude[k] < present) continue;
+            const double before = magnitudeBefore(beforeLength, k * coarseHz, beforeOffset) * scale;
+            if (before >= kAlreadyThereFraction * combMagnitude[k]) continue;
+            arrived[k] = combMagnitude[k] * combMagnitude[k];
+            arrivedTotal += arrived[k];
+        }
+        // Enough of the sound is new for the comparison to mean something.
+        if (arrivedTotal >= kMinArrivedShare * total) {
+            if (arrived[1] > 0.0 && standsOut(length, coarseHz, combMagnitude[1], coarseHz)) return 1;
+            for (int m = 2; m <= 6 && m <= count; ++m) {
+                if (arrived[m] <= 0.0
+                    || !standsOut(length, m * coarseHz, combMagnitude[m], coarseHz)) continue;
+                double onMultiples = 0.0;
+                for (int k = m; k <= count; k += m) onMultiples += arrived[k];
+                if (onMultiples / arrivedTotal >= kMinDominance) {
+                    outDominance = onMultiples / arrivedTotal;
+                    return m;
+                }
+            }
+            return 1;
+        }
+    }
+
+    // The coarse note itself is sounding: its fundamental is a real peak.
+    if (combMagnitude[1] >= present && standsOut(length, coarseHz, combMagnitude[1], coarseHz)) return 1;
 
     for (int m = 2; m <= 6 && m <= count; ++m) {
-        if (magnitudeAt[m] < present) continue; // nothing at that note's fundamental either
+        // Nothing at that note's fundamental either.
+        if (combMagnitude[m] < present
+            || !standsOut(length, m * coarseHz, combMagnitude[m], coarseHz)) continue;
         double onMultiples = 0.0;
-        for (int k = m; k <= count; k += m) onMultiples += magnitudeAt[k] * magnitudeAt[k];
+        for (int k = m; k <= count; k += m) onMultiples += combMagnitude[k] * combMagnitude[k];
         if (onMultiples / total >= kMinDominance) {
             outDominance = onMultiples / total;
             return m;
@@ -187,9 +349,10 @@ int SpectralRefiner::dominantMultiple(int length, double coarseHz, double& outDo
     return 1;
 }
 
-float SpectralRefiner::refine(float coarseHz) {
+float SpectralRefiner::refine(float coarseHz, int samplesSincePluck) {
     partials_.clear();
     lastMultiple_ = 1;
+    lastDivisor_ = 1;
     lastDominance_ = 0.0;
     lastExplained_ = 0.0;
     if (coarseHz <= 0.0f) return 0.0f;
@@ -202,10 +365,27 @@ float SpectralRefiner::refine(float coarseHz) {
     for (; length >= shortest; length /= 2) {
         if (filled_ < length + length / kHopDivisor) continue;
         double dominance = 0.0;
-        const int multiple = dominantMultiple(length, coarseHz, dominance);
+        const int multiple = dominantMultiple(length, coarseHz, samplesSincePluck, dominance);
+        int divisor = 1;
+        double target = coarseHz * multiple;
+        if (multiple == 1 && soundsAnOctaveBelow(length, coarseHz, samplesSincePluck)) {
+            divisor = 2;
+            target = coarseHz / 2.0;
+        }
+        // A note has a series of partials. One peak alone is accepted only
+        // when it is nearly everything in the window (a tuning fork, a
+        // whistle); otherwise it is hum, or the one partial a dead note left
+        // behind.
+        const double topHz = std::min(kMaxPartialHz, 0.45 * sampleRate_);
+        const int possible = static_cast<int>(topHz / target);
         double hz = 0.0;
-        if (refineWith(length, coarseHz * multiple, hz)) {
+        bool ok = refineWith(length, target, hz, possible >= 2 ? 2 : 1);
+        if (!ok && possible >= 2) {
+            ok = refineWith(length, target, hz, 1) && lastExplained_ >= kLonePartialExplained;
+        }
+        if (ok) {
             lastMultiple_ = multiple;
+            lastDivisor_ = divisor;
             lastDominance_ = dominance;
             return static_cast<float>(hz);
         }
@@ -213,7 +393,32 @@ float SpectralRefiner::refine(float coarseHz) {
     return 0.0f;
 }
 
-bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz) {
+float SpectralRefiner::refineKnown(float knownHz) {
+    partials_.clear();
+    lastMultiple_ = 1;
+    lastDivisor_ = 1;
+    lastDominance_ = 0.0;
+    lastExplained_ = 0.0;
+    if (knownHz <= 0.0f) return 0.0f;
+    const int shortest = shortestWindowFor(knownHz);
+    // A pure tone has one partial; anything with more must show two.
+    const double topHz = std::min(kMaxPartialHz, 0.45 * sampleRate_);
+    const int needed = (2.0 * knownHz <= topHz) ? 2 : 1;
+    for (int length = knownHz < kLowNoteHz ? longest_ : longest_ / 2; length >= shortest; length /= 2) {
+        if (filled_ < length + length / kHopDivisor) continue;
+        double hz = 0.0;
+        if (refineWith(length, knownHz, hz, needed)) return static_cast<float>(hz);
+        // A pure tone is followed by its one partial, on the same terms it
+        // was accepted on.
+        if (needed > 1 && refineWith(length, knownHz, hz, 1)
+            && lastExplained_ >= kLonePartialExplained) {
+            return static_cast<float>(hz);
+        }
+    }
+    return 0.0f;
+}
+
+bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int minPartials) {
     partials_.clear();
     // A different note: its stiffness is not the last one's.
     if (lastF0_ > 0.0 && std::fabs(centsBetween(coarseHz, lastF0_)) > 80.0) resetString();
@@ -270,7 +475,8 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz) {
     std::vector<Partial> used;
     used.reserve(partials_.size());
     for (const auto& p : partials_) {
-        if (p.steadiness >= kMinSteadiness && p.magnitude >= kMinRelativeMagnitude * strongest) {
+        if (p.steadiness >= kMinSteadiness && p.magnitude >= kMinRelativeMagnitude * strongest
+            && standsOut(length, p.frequency, p.magnitude, coarseHz)) {
             used.push_back(p);
         }
     }
@@ -278,6 +484,7 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz) {
     // (tuning fork, whistle, a note near the top of the range) has no more.
     if (used.empty()) return false;
     if (used.size() == 1 && used.front().k != 1) return false;
+    if (static_cast<int>(used.size()) < minPartials) return false;
     // The series must start low: without the first or second partial the fit
     // has nothing to hold the fundamental with.
     if (used.front().k > 2) return false;
@@ -373,6 +580,7 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz) {
         lastExplained_ = signalPower > 0.0 ? std::min(1.0, partialPower / signalPower) : 0.0;
     }
 
+    lastPartialCount_ = static_cast<int>(used.size());
     lastF0_ = fitted;
     lastLength_ = length;
     outHz = fitted;
