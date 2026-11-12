@@ -1432,6 +1432,45 @@ static void testBodyThumpBelowTheNoteIsNotItsFundamental() {
     assert(std::fabs(stats.meanCents) < 0.5);
 }
 
+static void testTurningPegIsFollowed() {
+    // A string tuned up by 30 cents in half a second while it rings, then
+    // left alone. Smoothing alone trailed it; the reading must stay close
+    // while it moves and land on the new pitch when it stops.
+    constexpr double sr = 48000.0, twoPi = 6.283185307179586;
+    constexpr int n = 2048;
+    constexpr double f0 = 196.0, turnAt = 1.0, turnFor = 0.5, turnBy = 30.0;
+    std::vector<float> input = generateNoise(48000 * 4, -70.0f);
+    const double amp[] = {1.0, 0.5, 0.35, 0.2, 0.15, 0.1};
+    double phase = 0.0;
+    std::vector<double> truth(input.size(), 0.0);
+    for (size_t i = 24000; i < input.size(); ++i) {
+        const double t = (i - 24000) / sr;
+        const double c = std::clamp((t - turnAt) / turnFor, 0.0, 1.0) * turnBy;
+        truth[i] = c;
+        phase += twoPi * f0 * std::pow(2.0, c / 1200.0) / sr;
+        double v = 0.0;
+        for (int k = 1; k <= 6; ++k) v += amp[k - 1] * std::exp(-(0.8 + 0.1 * k) * t) * std::sin(k * phase + 0.3 * k);
+        input[i] += static_cast<float>(0.1 * v);
+    }
+    TunerEngine engine(48000.0f, n);
+    engine.setInstrument("guitar");
+    double worstMoving = 0.0, worstAfter = 0.0;
+    int after = 0;
+    for (size_t p = 0; p + n <= input.size(); p += n) {
+        const auto r = engine.process(input.data() + p, n);
+        const double t = (static_cast<double>(p + n) - 24000) / sr;
+        if (!r.hasPitch || t < turnAt) continue;
+        const double error = std::fabs(1200.0 * std::log2(r.frequency / f0) - truth[p + n - 1]);
+        if (t <= turnAt + turnFor + 0.2) worstMoving = std::max(worstMoving, error);
+        else if (t <= turnAt + turnFor + 1.2) { worstAfter = std::max(worstAfter, error); ++after; }
+    }
+    std::cout << "peg turned 30 cents in 0.5 s: worst " << worstMoving << " cents behind while moving, "
+              << worstAfter << " after it stopped\n";
+    assert(after > 15);
+    assert(worstMoving < 11.0);
+    assert(worstAfter < 1.0);
+}
+
 static void testMainsHumIsNotANote() {
     // 50 Hz and its harmonics, steady, with nobody playing: a clean series
     // inside a bass's range.
@@ -1577,6 +1616,7 @@ int main() {
     testWeakFundamentalIsNotReadAnOctaveUp();
     testPulledFundamentalDoesNotOutvoteTheSeries();
     testMainsHumIsNotANote();
+    testTurningPegIsFollowed();
     testBodyThumpBelowTheNoteIsNotItsFundamental();
     testRingingLowStringStaysItself();
 

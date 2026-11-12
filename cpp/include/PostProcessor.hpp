@@ -47,6 +47,9 @@ private:
 
     // EMA state
     float smoothedFreq_ = 0.0f;
+    // How fast the note is moving, cents per frame (a peg being turned).
+    float trendCents_ = 0.0f;
+    float lastError_ = 0.0f;
 
     // Hysteresis state
     int  lockedMidi_     = -1;

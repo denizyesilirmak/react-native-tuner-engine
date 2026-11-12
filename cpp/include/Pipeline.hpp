@@ -99,6 +99,8 @@ private:
     bool  bornWithoutPluck_ = false;
     bool  isMainsHum(float hz) const;
     int   unconfirmedTries_ = 0;
+    long  unconfirmedAt_ = -2;   // frame it was measured in
+    long  frameIndex_ = 0;
     // The note in hand was decided after the last pluck (not carried over it).
     bool decidedAtPluck_ = true;
     float minHz_ = 60.0f;   // the detector's range, to hold corrections to

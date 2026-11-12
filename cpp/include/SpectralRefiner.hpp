@@ -110,6 +110,11 @@ private:
     int    lastMultiple_ = 1;
     int    lastDivisor_ = 1;
     double lastDominance_ = 0.0;
+    // How far each low partial of this string sits from the rest (cents),
+    // learned while the rest could be heard; NaN-free: `known` says which.
+    static constexpr int kPulledPartials = 4;
+    double pullCents_[kPulledPartials + 1] = {0.0};
+    bool   pullKnown_[kPulledPartials + 1] = {false};
     mutable bool lastByArrival_ = false;
     double lastExplained_ = 0.0;
     int    lastPartialCount_ = 0;

@@ -18,10 +18,15 @@ static constexpr float kHumMemorySeconds = 30.0f;
 // this many attempts.
 static constexpr float kConfirmCents = 3.0f;
 static constexpr int   kConfirmMaxTries = 3;
+// A tone this much of the sound, from a detector this sure, needs no second
+// measurement when no pluck is near.
+static constexpr float kPlainExplained = 0.95f;
+static constexpr float kPlainConfidence = 0.8f;
 // ...and only this soon after a pluck; a note met in mid-ring is steady.
 static constexpr float kConfirmSeconds = 0.5f;
 // The furthest one faint frame's measurement may sit from the reading.
 static constexpr float kFaintMaxStepCents = 8.0f;
+static constexpr float kRefoundMaxStepCents = 1.5f;
 static constexpr float kRefineGraceSeconds = 0.25f;
 // A subharmonic correction is only believed when the corrected note's
 // partials make up most of the sound.
@@ -108,6 +113,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         refiner_.push(workBuffer_.data(), frameSize_);
     }
 
+    ++frameIndex_;
+
     // --- RMS gate ---
     const float rmsLinear = calculateRmsLinear(input, frameSize_);
     const float rmsDb     = 20.0f * std::log10(std::max(rmsLinear, kMinLinear));
@@ -176,6 +183,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     bool refinedReading = false;
     bool followed = false;
     bool faint = false;
+    bool refound = false;
     // The first decision after a pluck rests on a few periods, too short a
     // stretch to show a weak fundamental: a string whose even partials carry
     // nearly all of its energy is taken for the octave above, and following
@@ -306,6 +314,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
                 && samplesSincePluck_ > static_cast<int>(kSettleSeconds * sampleRate_)
                 && std::fabs(1200.0f * std::log2(refined / heldFrequency_)) <= kFollowCents) {
                 faint = true;
+                refound = true;
             }
             if (refiner_.lastPartialCount() >= 2 && refiner_.lastExplained() >= kMinExplained) {
                 // The detector proposes, the spectrum confirms. A low string
@@ -400,7 +409,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         if (std::fabs(cents) < kStepCents) {
             pendingStep_ = 0;
         } else if (pendingStep_ == direction) {
-            pendingStep_ = 0;               // borne out: take it
+            // Borne out: take it, and the ones that follow the same way.
         } else {
             pendingStep_ = direction;
             measuredHz = heldFrequency_;    // not yet
@@ -414,9 +423,11 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // room's level). Such a frame may nudge the reading, not move it.
     if (faint && heldFrequency_ > 0.0f) {
         const float cents = 1200.0f * std::log2(measuredHz / heldFrequency_);
-        if (std::fabs(cents) > kFaintMaxStepCents) {
-            measuredHz = heldFrequency_
-                * std::pow(2.0f, std::copysign(kFaintMaxStepCents, cents) / 1200.0f);
+        // (Found again after a gap, the smoothing may be starting afresh
+        // and would take the frame as it is: there it may differ less.)
+        const float most = refound ? kRefoundMaxStepCents : kFaintMaxStepCents;
+        if (std::fabs(cents) > most) {
+            measuredHz = heldFrequency_ * std::pow(2.0f, std::copysign(most, cents) / 1200.0f);
         }
     }
 
@@ -447,12 +458,21 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // A new note's first measurement is taken while the string is still
     // settling from the pluck and can sit 5 to 20 cents from the second one.
     // It is shown once a second measurement agrees with it.
-    if (refinedReading && heldFrequency_ <= 0.0f && samplesSincePluck_ >= 0
-        && samplesSincePluck_ <= static_cast<int>(kConfirmSeconds * sampleRate_)) {
-        const bool agrees = unconfirmedHz_ > 0.0f
+    // A note no pluck brought needs the same, unless it is as plain as a
+    // tuning fork: the rumble of a room passes for one frame as a steady low
+    // tone that is most of what a bass range hears, and is gone the next.
+    const bool afterPluck = samplesSincePluck_ >= 0
+        && samplesSincePluck_ <= static_cast<int>(kConfirmSeconds * sampleRate_);
+    const bool plain = refiner_.lastExplained() >= kPlainExplained
+        && det.confidence >= kPlainConfidence;
+    if (refinedReading && heldFrequency_ <= 0.0f && (afterPluck || !plain)) {
+        // The frame before, not some earlier one.
+        const bool agrees = unconfirmedHz_ > 0.0f && unconfirmedAt_ == frameIndex_ - 1
             && std::fabs(1200.0f * std::log2(measuredHz / unconfirmedHz_)) <= kConfirmCents;
-        if (!agrees && unconfirmedTries_ < kConfirmMaxTries) {
+        // After a pluck the wait is bounded; with none there is no hurry.
+        if (!agrees && (!afterPluck || unconfirmedTries_ < kConfirmMaxTries)) {
             unconfirmedHz_ = measuredHz;
+            unconfirmedAt_ = frameIndex_;
             ++unconfirmedTries_;
             PitchResult nopit;
             nopit.rmsDb = rmsDb;

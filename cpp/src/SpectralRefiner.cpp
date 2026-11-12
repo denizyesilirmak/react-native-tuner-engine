@@ -38,6 +38,10 @@ constexpr double kMinSteadiness     = 0.85;
 constexpr double kMinEarlyToLate    = 0.8;
 // A partial this far from the fitted series is being hit by something else.
 constexpr double kOutlierCents      = 3.0;
+// A low partial's pull against the rest: the most that is believed, and how
+// fast it is learned.
+constexpr double kMaxPullCents      = 25.0;
+constexpr double kPullSmoothing     = 0.2;
 // Share of the vote that keeps a followed note with the partials it has
 // been read from.
 constexpr double kStayShare         = 0.35;
@@ -138,6 +142,7 @@ void SpectralRefiner::resetString() {
     haveStiffness_ = false;
     stiffness_ = 0.0;
     lastF0_ = 0.0;
+    for (int k = 0; k <= kPulledPartials; ++k) { pullCents_[k] = 0.0; pullKnown_[k] = false; }
 }
 
 // Frequency of the spectral peak near `hz`, from the phase the peak advances
@@ -656,7 +661,7 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
 
     // Fundamental: what each partial says it is, the weighted median of
     // those, then the mean of the ones that agree with it.
-    struct Vote { double f0; double weight; };
+    struct Vote { double f0; double weight; int k; double raw; };
     std::vector<Vote> votes;
     votes.reserve(used.size());
     double totalWeight = 0.0;
@@ -681,7 +686,16 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
         // partial barely out of the room's noise had 322 Hz to say about a
         // 329 Hz string.
         const double weight = std::sqrt(p.magnitude) * std::min(p.k, 6) * clarity[i] * clarity[i];
-        votes.push_back({p.frequency / (p.k * std::sqrt(1.0 + stiffness * p.k * p.k)), weight});
+        const double raw = p.frequency / (p.k * std::sqrt(1.0 + stiffness * p.k * p.k));
+        // A low partial the instrument's body pulls away from the rest (the
+        // fundamental of a G string, 8 cents, for the whole note) is put
+        // back by what it has shown, so that when the others have died away
+        // and it is all there is to read, the reading does not drift to it.
+        double corrected = raw;
+        if (p.k <= kPulledPartials && pullKnown_[p.k]) {
+            corrected = raw * std::pow(2.0, -pullCents_[p.k] / 1200.0);
+        }
+        votes.push_back({corrected, weight, p.k, raw});
         totalWeight += weight;
     }
     std::sort(votes.begin(), votes.end(), [](const Vote& a, const Vote& b) { return a.f0 < b.f0; });
@@ -710,6 +724,29 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
         }
     }
     const double fitted = agreeingWeight > 0.0 ? agreeing / agreeingWeight : median;
+
+    // Learn the pull of each low partial against the others, once the note
+    // has settled and while at least three others agree on where it is.
+    if (known) {
+        for (const auto& v : votes) {
+            if (v.k > kPulledPartials) continue;
+            double others = 0.0, othersWeight = 0.0;
+            int agreeingOthers = 0;
+            for (const auto& o : votes) {
+                if (o.k == v.k || std::fabs(centsBetween(o.f0, fitted)) > kOutlierCents) continue;
+                others += o.weight * o.f0;
+                othersWeight += o.weight;
+                ++agreeingOthers;
+            }
+            if (agreeingOthers < 3 || othersWeight <= 0.0) continue;
+            const double pull = centsBetween(v.raw, others / othersWeight);
+            if (std::fabs(pull) > kMaxPullCents) continue;
+            pullCents_[v.k] = pullKnown_[v.k]
+                ? pullCents_[v.k] + kPullSmoothing * (pull - pullCents_[v.k])
+                : pull;
+            pullKnown_[v.k] = true;
+        }
+    }
 
     if (std::fabs(centsBetween(fitted, coarseHz)) > kMaxMoveCents) return false;
 

@@ -7,6 +7,13 @@
 // the caller's rate once a step reaches kFastStepCents.
 static constexpr float kSteadyAlpha   = 0.12f;
 static constexpr float kFastStepCents = 6.0f;
+// Following a moving note: how much of each error goes into the trend, the
+// error below which nothing is learned, the fade when errors disagree, and
+// the fastest motion followed (cents per frame).
+static constexpr float kTrendGain     = 0.25f;
+static constexpr float kTrendMinCents = 0.7f;
+static constexpr float kTrendFade     = 0.5f;
+static constexpr float kTrendMaxCents = 15.0f;
 
 PostProcessor::PostProcessor() : cfg_{} {}
 PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
@@ -19,6 +26,7 @@ void PostProcessor::reset() {
     medianIdx_      = 0;
     medianFill_     = 0;
     smoothedFreq_   = 0.0f;
+        trendCents_     = 0.0f;
     lockedMidi_     = -1;
     candidateMidi_  = -1;
     candidateCount_ = 0;
@@ -103,6 +111,7 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence, 
         medianIdx_      = 0;
         medianFill_     = 0;
         smoothedFreq_   = 0.0f;
+        trendCents_     = 0.0f;
     } else {
         candidateMidi_  = -1;
         candidateCount_ = 0;
@@ -121,9 +130,24 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence, 
         // A ringing string wanders by a cent or two and the display should
         // not; a peg being turned moves it by many and the display must keep
         // up. Slow for small steps, fast for large ones.
-        const float step = std::fabs(1200.0f * std::log2(med / smoothedFreq_));
-        const float adaptive = kSteadyAlpha + (alpha - kSteadyAlpha) * std::min(1.0f, step / kFastStepCents);
-        smoothedFreq_ = adaptive * med + (1.0f - adaptive) * smoothedFreq_;
+        //
+        // Smoothing alone trails a moving note: at 60 cents a second the
+        // reading was 9 cents behind a loud string and 25 behind a faint
+        // one. So the motion itself is followed. The reading is first moved
+        // on by the trend, then corrected by what was measured, and the
+        // trend learns from the same error; it fades as soon as the errors
+        // stop agreeing, so a ringing string's wander does not start one.
+        const float predicted = smoothedFreq_ * std::pow(2.0f, trendCents_ / 1200.0f);
+        const float error = 1200.0f * std::log2(med / predicted);
+        const float adaptive = kSteadyAlpha
+            + (alpha - kSteadyAlpha) * std::min(1.0f, std::fabs(error) / kFastStepCents);
+        smoothedFreq_ = predicted * std::pow(2.0f, adaptive * error / 1200.0f);
+        const bool sameWay = (error > 0.0f) == (lastError_ > 0.0f)
+            && std::fabs(error) >= kTrendMinCents && std::fabs(lastError_) >= kTrendMinCents;
+        trendCents_ = sameWay
+            ? std::clamp(trendCents_ + kTrendGain * error, -kTrendMaxCents, kTrendMaxCents)
+            : trendCents_ * kTrendFade;
+        lastError_ = error;
     } else {
         smoothedFreq_ = alpha * med + (1.0f - alpha) * smoothedFreq_;
     }
