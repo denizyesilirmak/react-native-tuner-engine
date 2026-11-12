@@ -81,6 +81,9 @@ constexpr double kMinArrivedShare   = 0.2;
 // A single partial with no series is a note only if it accounts for this
 // share of the window's energy.
 constexpr double kLonePartialExplained = 0.8;
+// ...and of a followed note, whose one remaining partial need not be all
+// of the sound, only most of it.
+constexpr double kLoneFollowExplained = 0.5;
 
 double centsBetween(double a, double b) { return 1200.0 * std::log2(a / b); }
 
@@ -424,7 +427,7 @@ float SpectralRefiner::refineKnown(float knownHz) {
         // A pure tone is followed by its one partial, on the same terms it
         // was accepted on.
         if (needed > 1 && refineWith(length, knownHz, hz, 1, true)
-            && lastExplained_ >= kLonePartialExplained) {
+            && lastExplained_ >= kLoneFollowExplained) {
             return static_cast<float>(hz);
         }
     }
@@ -500,7 +503,10 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
     // One partial is enough when it is the fundamental itself: a pure tone
     // (tuning fork, whistle, a note near the top of the range) has no more.
     if (used.empty()) return false;
-    if (used.size() == 1 && used.front().k != 1) return false;
+    // ...or, for a note already being followed, one of its low partials: a
+    // low E on a phone rings on for seconds as little more than its second
+    // partial, and that partial still says exactly where the string is.
+    if (used.size() == 1 && used.front().k != 1 && !(known && used.front().k <= 3)) return false;
     if (static_cast<int>(used.size()) < minPartials) return false;
     // The series must start low: without the first or second partial the fit
     // has nothing to hold the fundamental with.
