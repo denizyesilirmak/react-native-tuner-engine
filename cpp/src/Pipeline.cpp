@@ -8,7 +8,7 @@ static constexpr float kRefinedEmaAlpha = 0.7f;
 // ...and for a followed note that has become faint: slow whatever the step.
 static constexpr float kFaintEmaAlpha = 0.06f;
 // A step this large in a followed note needs a second frame to agree.
-static constexpr float kStepCents = 4.0f;
+static constexpr float kStepCents = 6.0f;
 // Mains hum: how close to 50/60/100/120 Hz, how long after a pluck a note is
 // not suspected, and how long hum once heard is remembered.
 static constexpr float kHumCents = 10.0f;
