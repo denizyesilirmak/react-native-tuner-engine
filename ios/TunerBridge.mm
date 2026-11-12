@@ -113,6 +113,9 @@
   }
   if (opts[@"a4"]) _dispatcher->setA4([opts[@"a4"] floatValue]);
   if (opts[@"hpfCutoffHz"]) _dispatcher->setHpfCutoff([opts[@"hpfCutoffHz"] floatValue]);
+  if ([opts[@"pitchReference"] isKindOfClass:[NSString class]]) {
+    _dispatcher->setPeriodReference([opts[@"pitchReference"] isEqualToString:@"period"]);
+  }
   if (opts[@"emaAlpha"] || opts[@"hysteresisFrames"]) {
     PostProcessor::Config cfg;
     if (opts[@"emaAlpha"])          cfg.emaAlpha         = [opts[@"emaAlpha"] floatValue];

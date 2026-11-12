@@ -1475,6 +1475,47 @@ static void testTurningPegIsFollowed() {
     assert(worstSettled < 0.5);
 }
 
+static void testPeriodReferenceReadsTheWaveformsPeriod() {
+    // A string whose fundamental sits 9 cents under its series, as a
+    // guitar's G does. By the series it is at 0; a period-based tuner reads
+    // the power-weighted mix, a few cents under.
+    constexpr double sr = 48000.0, twoPi = 6.283185307179586;
+    constexpr double f0 = 196.0;
+    constexpr int n = 2048;
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    const double amp[] = {1.0, 0.3, 0.25, 0.1, 0.1, 0.12};
+    for (size_t i = 24000; i < input.size(); ++i) {
+        const double t = (i - 24000) / sr;
+        double v = 0.0;
+        for (int k = 1; k <= 6; ++k) {
+            const double f = k * f0 * (k == 1 ? std::pow(2.0, -9.0 / 1200.0) : 1.0);
+            v += amp[k - 1] * std::exp(-1.0 * t) * std::sin(twoPi * f * t + 0.4 * k);
+        }
+        input[i] += static_cast<float>(0.1 * v);
+    }
+    double series = 0.0, period = 0.0;
+    for (int mode = 0; mode < 2; ++mode) {
+        TunerEngine engine(48000.0f, n);
+        engine.setInstrument("guitar");
+        engine.setPeriodReference(mode == 1);
+        double sum = 0.0;
+        int count = 0;
+        for (size_t p = 0; p + n <= input.size(); p += n) {
+            const auto r = engine.process(input.data() + p, n);
+            if (!r.hasPitch || p < 48000) continue;
+            sum += 1200.0 * std::log2(r.frequency / f0);
+            ++count;
+        }
+        assert(count > 10);
+        (mode == 0 ? series : period) = sum / count;
+    }
+    // Power x k^2 weights: 1, 0.36, 0.5625, 0.16, 0.25, 0.5184 -> -9 / 2.85.
+    std::cout << "fundamental 9 cents under its series: series reference " << series
+              << " cents, period reference " << period << " cents\n";
+    assert(std::fabs(series) < 1.0);
+    assert(std::fabs(period - (-9.0 / 2.8509)) < 1.0);
+}
+
 static void testMainsHumIsNotANote() {
     // 50 Hz and its harmonics, steady, with nobody playing: a clean series
     // inside a bass's range.
@@ -1620,6 +1661,7 @@ int main() {
     testWeakFundamentalIsNotReadAnOctaveUp();
     testPulledFundamentalDoesNotOutvoteTheSeries();
     testMainsHumIsNotANote();
+    testPeriodReferenceReadsTheWaveformsPeriod();
     testTurningPegIsFollowed();
     testBodyThumpBelowTheNoteIsNotItsFundamental();
     testRingingLowStringStaysItself();

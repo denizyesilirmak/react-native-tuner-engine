@@ -61,6 +61,14 @@ public:
     // soundsAnOctaveBelow), else 1.
     int    lastDivisor() const { return lastDivisor_; }
     double lastDominance() const { return lastDominance_; }
+    // What the reading stands for. false (default): where the string's
+    // series of partials is, which is what the ear hears and does not change
+    // as the note dies. true: the period of the waveform, which is what a
+    // tuner built on autocorrelation or YIN shows; on a string whose
+    // fundamental the instrument's body pulls (a guitar's G, 8 cents) the
+    // two differ by 4 to 5 cents.
+    void setPeriodReference(bool on) { periodReference_ = on; }
+    bool periodReference() const { return periodReference_; }
     // The last multiple was decided from what a pluck brought, not from the
     // spectrum as it stands.
     bool lastMultipleByArrival() const { return lastByArrival_; }
@@ -110,6 +118,7 @@ private:
     int    lastMultiple_ = 1;
     int    lastDivisor_ = 1;
     double lastDominance_ = 0.0;
+    bool   periodReference_ = false;
     // How far each low partial of this string sits from the rest (cents),
     // learned while the rest could be heard; NaN-free: `known` says which.
     static constexpr int kPulledPartials = 4;

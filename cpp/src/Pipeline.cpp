@@ -622,6 +622,10 @@ void Pipeline::resetTracking() {
     clearHold();
 }
 
+void Pipeline::setPeriodReference(bool on) {
+    refiner_.setPeriodReference(on);
+}
+
 void Pipeline::setHpfCutoff(float hz) {
     hpf_ = BiquadHpf(sampleRate_, hz);
     workPrimed_ = false; // the kept frame was filtered at the old cutoff

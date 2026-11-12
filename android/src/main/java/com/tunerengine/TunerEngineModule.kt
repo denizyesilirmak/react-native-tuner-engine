@@ -45,6 +45,9 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
       if (opts?.hasKey("hpfCutoffHz") == true) {
         nativeSetHpfCutoff(opts.getDouble("hpfCutoffHz").toFloat())
       }
+      if (opts?.hasKey("pitchReference") == true) {
+        nativeSetPeriodReference(opts.getString("pitchReference") == "period")
+      }
 
       val hasEma = opts?.hasKey("emaAlpha") == true
       val hasHyst = opts?.hasKey("hysteresisFrames") == true
@@ -212,6 +215,7 @@ class TunerEngineModule(reactContext: ReactApplicationContext) :
   private external fun nativeSetInstrument(name: String)
   private external fun nativeSetTuning(name: String)
   private external fun nativeSetHpfCutoff(hz: Float)
+  private external fun nativeSetPeriodReference(on: Boolean)
   private external fun nativeSetPostProcessorConfig(emaAlpha: Float, hysteresisFrames: Int)
   private external fun nativeSetOnsetDetection(enabled: Boolean)
   private external fun nativeSetTemperament(name: String)

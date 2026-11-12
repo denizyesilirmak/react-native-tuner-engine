@@ -25,6 +25,9 @@ public:
     void setTemperament(const std::string& name);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    // false: the string's series of partials (default). true: the period of
+    // the waveform, as tuners built on autocorrelation show it.
+    void setPeriodReference(bool on);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
     void setNoteHold(Pipeline::NoteHold hold);

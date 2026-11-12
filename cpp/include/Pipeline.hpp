@@ -43,6 +43,8 @@ public:
     void setTemperament(const std::string& name); // "equal" or "just"
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    // See SpectralRefiner::setPeriodReference.
+    void setPeriodReference(bool on);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
     void setNoteHold(NoteHold hold);

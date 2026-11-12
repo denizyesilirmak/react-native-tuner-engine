@@ -38,6 +38,9 @@ constexpr double kMinSteadiness     = 0.85;
 constexpr double kMinEarlyToLate    = 0.8;
 // A partial this far from the fitted series is being hit by something else.
 constexpr double kOutlierCents      = 3.0;
+// In period reference, how far from the series a partial may sit and still
+// be part of the waveform.
+constexpr double kPeriodOutlierCents = 30.0;
 // A low partial's pull against the rest: the most that is believed, and how
 // fast it is learned.
 constexpr double kMaxPullCents      = 25.0;
@@ -727,7 +730,23 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
             agreeingWeight += v.weight;
         }
     }
-    const double fitted = agreeingWeight > 0.0 ? agreeing / agreeingWeight : median;
+    double fitted = agreeingWeight > 0.0 ? agreeing / agreeingWeight : median;
+    if (periodReference_) {
+        // The period of a waveform made of these partials: each counts by
+        // its power times k squared (the curvature its cosine gives the
+        // autocorrelation peak), unstretched and uncorrected. Partials far
+        // from the rest are noise and are left out.
+        double sum = 0.0, weight = 0.0;
+        for (size_t i = 0; i < used.size(); ++i) {
+            const auto& p = used[i];
+            const double f = p.frequency / p.k;
+            if (std::fabs(centsBetween(f, fitted)) > kPeriodOutlierCents) continue;
+            const double w = p.magnitude * p.magnitude * p.k * p.k * clarity[i];
+            sum += w * f;
+            weight += w;
+        }
+        if (weight > 0.0) fitted = sum / weight;
+    }
 
     // Learn the pull of each low partial against the others, once the note
     // has settled and while at least three others agree on where it is.

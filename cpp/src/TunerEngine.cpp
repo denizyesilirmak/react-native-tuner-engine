@@ -54,6 +54,10 @@ void TunerEngine::setPostProcessorConfig(PostProcessor::Config cfg) {
     pipeline_->setPostProcessorConfig(cfg);
 }
 
+void TunerEngine::setPeriodReference(bool on) {
+    pipeline_->setPeriodReference(on);
+}
+
 void TunerEngine::setHpfCutoff(float hz) {
     pipeline_->setHpfCutoff(hz);
 }
