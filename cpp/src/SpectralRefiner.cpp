@@ -44,7 +44,10 @@ constexpr double kStayShare         = 0.35;
 // The refined pitch may not leave the neighbourhood of the coarse one.
 constexpr double kMaxMoveCents      = 60.0;
 // Stiffness of real strings; beyond this the fit is following noise.
-constexpr double kMaxStiffness      = 2.0e-3;
+constexpr double kMaxStiffness      = 1.0e-3;
+// The partials must agree this closely (median, cents) once a stiffness is
+// applied, for that stiffness to be believed.
+constexpr double kStiffnessFitCents = 1.5;
 constexpr double kStiffnessSmoothing = 0.25;
 // Subharmonic check: how many multiples of the coarse estimate to look at,
 // and the share of their energy that must sit on every m-th one for the note
@@ -54,6 +57,8 @@ constexpr double kMinDominance      = 0.8;
 // A partial counts as sounding from this fraction of the strongest one's
 // amplitude (about -30 dB).
 constexpr double kPresentFraction   = 0.03;
+// How far a partial may sit from the series and still be one of its own.
+constexpr double kOwnPartialCents   = 20.0;
 // ...and it must stand this far above what lies between the partials. In a
 // noisy room a decayed note leaves every bin above 3 % of its strongest
 // partial, and noise then passed for a fundamental: a ringing B3 was read as
@@ -296,23 +301,83 @@ bool SpectralRefiner::soundsAnOctaveBelow(int length, double hz, int samplesSinc
 int SpectralRefiner::dominantMultiple(int length, double coarseHz, int samplesSincePluck,
                                       double& outDominance) const {
     outDominance = 0.0;
+    lastByArrival_ = false;
     const double topHz = std::min(kMaxPartialHz, 0.45 * sampleRate_);
     double combMagnitude[kCombPartials + 1] = {0.0};
+    double combHz[kCombPartials + 1] = {0.0};
+    double combSteadiness[kCombPartials + 1] = {0.0};
     double total = 0.0, strongest = 0.0;
-    int count = 0;
+    int count = 0, strongestK = 1;
     for (int k = 1; k <= kCombPartials; ++k) {
         const double hz = k * coarseHz;
         if (hz > topHz) break;
         double measured = 0.0, magnitude = 0.0, steadiness = 0.0;
         if (!measure(length, hz, measured, magnitude, steadiness)) continue;
         combMagnitude[k] = magnitude;
+        combHz[k] = measured;
+        combSteadiness[k] = steadiness;
         total += magnitude * magnitude;
-        strongest = std::max(strongest, magnitude);
+        if (magnitude > strongest) { strongest = magnitude; strongestK = k; }
         count = k;
     }
     if (total <= 0.0 || count < 4) return 1;
 
     const double present = kPresentFraction * strongest;
+
+    // A partial of the coarse note itself: there, steady, a real peak, and
+    // in tune with the series the strongest partial belongs to. The last
+    // matters: a nylon A4 came with a thump of the guitar's body at 222 to
+    // 225 Hz, a third of a semitone over half its pitch. Taken for a
+    // fundamental it made the note an A3.
+    const double seriesHz = combHz[strongestK] / strongestK;
+    auto own = [&](int k, bool steady) {
+        return combMagnitude[k] >= present
+            && (!steady || combSteadiness[k] >= kMinSteadiness)
+            && std::fabs(centsBetween(combHz[k] / k, seriesHz)) <= kOwnPartialCents
+            && standsOut(length, k * coarseHz, combMagnitude[k], coarseHz);
+    };
+    // Which note the partials in `energy` (squared magnitudes, 0 where a
+    // partial does not count) make: the coarse one (1) or one m times higher.
+    auto decide = [&](const double* energy, double energyTotal) {
+        // Most of it on the even partials: the octave above, unless the
+        // coarse note shows an odd partial of its own above the first. The
+        // first alone does not say so. A nylon A4 came with a thump of the
+        // guitar's body near 220 Hz, in tune with nothing but loud enough,
+        // and was read as an A3 with no third, fifth or seventh partial,
+        // which no string has. A banjo's low G, a bass's low E and a nylon
+        // E4 have next to no fundamental and their third or fifth is there.
+        if (count >= 2 && energy[2] > 0.0
+            && standsOut(length, 2 * coarseHz, combMagnitude[2], coarseHz)) {
+            double onEven = 0.0;
+            for (int k = 2; k <= count; k += 2) onEven += energy[k];
+            if (onEven / energyTotal >= kMinDominance) {
+                for (int k = 3; k <= count && k <= 7; k += 2) {
+                    if (energy[k] > 0.0 && own(k, true)) return 1;
+                }
+                outDominance = onEven / energyTotal;
+                return 2;
+            }
+        }
+        // The coarse note itself is sounding: its fundamental is a real peak.
+        if (energy[1] > 0.0 && own(1, false)) return 1;
+        for (int m = 3; m <= 6 && m <= count; ++m) {
+            // Nothing at that note's fundamental either.
+            if (energy[m] <= 0.0
+                || !standsOut(length, m * coarseHz, combMagnitude[m], coarseHz)) continue;
+            double onMultiples = 0.0;
+            for (int k = m; k <= count; k += m) onMultiples += energy[k];
+            if (onMultiples / energyTotal >= kMinDominance) {
+                int ownBetween = 0;
+                for (int k = 1; k <= count; ++k) {
+                    if (k % m != 0 && energy[k] > 0.0 && own(k, true)) ++ownBetween;
+                }
+                if (ownBetween >= 2) return 1;
+                outDominance = onMultiples / energyTotal;
+                return m;
+            }
+        }
+        return 1;
+    };
 
     // Just after a pluck, with the moment before it still in the history:
     // go by what the pluck brought. Over a low E still ringing, a plucked E4
@@ -333,36 +398,17 @@ int SpectralRefiner::dominantMultiple(int length, double coarseHz, int samplesSi
         }
         // Enough of the sound is new for the comparison to mean something.
         if (arrivedTotal >= kMinArrivedShare * total) {
-            if (arrived[1] > 0.0 && standsOut(length, coarseHz, combMagnitude[1], coarseHz)) return 1;
-            for (int m = 2; m <= 6 && m <= count; ++m) {
-                if (arrived[m] <= 0.0
-                    || !standsOut(length, m * coarseHz, combMagnitude[m], coarseHz)) continue;
-                double onMultiples = 0.0;
-                for (int k = m; k <= count; k += m) onMultiples += arrived[k];
-                if (onMultiples / arrivedTotal >= kMinDominance) {
-                    outDominance = onMultiples / arrivedTotal;
-                    return m;
-                }
-            }
-            return 1;
+            const int multiple = decide(arrived, arrivedTotal);
+            lastByArrival_ = multiple > 1;
+            return multiple;
         }
     }
 
-    // The coarse note itself is sounding: its fundamental is a real peak.
-    if (combMagnitude[1] >= present && standsOut(length, coarseHz, combMagnitude[1], coarseHz)) return 1;
-
-    for (int m = 2; m <= 6 && m <= count; ++m) {
-        // Nothing at that note's fundamental either.
-        if (combMagnitude[m] < present
-            || !standsOut(length, m * coarseHz, combMagnitude[m], coarseHz)) continue;
-        double onMultiples = 0.0;
-        for (int k = m; k <= count; k += m) onMultiples += combMagnitude[k] * combMagnitude[k];
-        if (onMultiples / total >= kMinDominance) {
-            outDominance = onMultiples / total;
-            return m;
-        }
+    double all[kCombPartials + 1] = {0.0};
+    for (int k = 1; k <= count; ++k) {
+        if (combMagnitude[k] >= present) all[k] = combMagnitude[k] * combMagnitude[k];
     }
-    return 1;
+    return decide(all, total);
 }
 
 float SpectralRefiner::refine(float coarseHz, int samplesSincePluck) {
@@ -522,33 +568,59 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
     // Stiffness: the median of the slopes between every pair of partials
     // (Theil-Sen) of (f_k / k)^2 against k^2, which is a + a*B*k^2.
     double stiffness = B;
-    if (used.size() >= 3 && used.back().k >= 4) {
-        std::vector<double> slopes;
-        slopes.reserve(used.size() * used.size() / 2);
-        for (size_t a = 0; a < used.size(); ++a) {
-            for (size_t b = a + 1; b < used.size(); ++b) {
-                const double xa = static_cast<double>(used[a].k) * used[a].k;
-                const double xb = static_cast<double>(used[b].k) * used[b].k;
-                const double ya = (used[a].frequency / used[a].k) * (used[a].frequency / used[a].k);
-                const double yb = (used[b].frequency / used[b].k) * (used[b].frequency / used[b].k);
-                slopes.push_back((yb - ya) / (xb - xa));
-            }
-        }
-        std::nth_element(slopes.begin(), slopes.begin() + slopes.size() / 2, slopes.end());
-        const double slope = slopes[slopes.size() / 2];
-        std::vector<double> intercepts;
-        intercepts.reserve(used.size());
+    bool trustedStiffness = false;
+    {
+        // From the second partial up: the first is the one the instrument's
+        // body pulls about, and it has the least to say about stiffness.
+        std::vector<Partial> upper;
+        upper.reserve(used.size());
         for (const auto& p : used) {
-            intercepts.push_back((p.frequency / p.k) * (p.frequency / p.k)
-                                 - slope * static_cast<double>(p.k) * p.k);
+            if (p.k >= 2) upper.push_back(p);
         }
-        std::nth_element(intercepts.begin(), intercepts.begin() + intercepts.size() / 2, intercepts.end());
-        const double intercept = intercepts[intercepts.size() / 2];
-        if (intercept > 0.0) {
-            const double frameB = std::clamp(slope / intercept, 0.0, kMaxStiffness);
-            stiffness = haveStiffness_
-                ? stiffness_ + kStiffnessSmoothing * (frameB - stiffness_)
-                : frameB;
+        if (upper.size() >= 3 && upper.back().k >= 5) {
+            std::vector<double> slopes;
+            slopes.reserve(upper.size() * upper.size() / 2);
+            for (size_t a = 0; a < upper.size(); ++a) {
+                for (size_t b = a + 1; b < upper.size(); ++b) {
+                    const double xa = static_cast<double>(upper[a].k) * upper[a].k;
+                    const double xb = static_cast<double>(upper[b].k) * upper[b].k;
+                    const double ya = (upper[a].frequency / upper[a].k) * (upper[a].frequency / upper[a].k);
+                    const double yb = (upper[b].frequency / upper[b].k) * (upper[b].frequency / upper[b].k);
+                    slopes.push_back((yb - ya) / (xb - xa));
+                }
+            }
+            std::nth_element(slopes.begin(), slopes.begin() + slopes.size() / 2, slopes.end());
+            const double slope = slopes[slopes.size() / 2];
+            std::vector<double> intercepts;
+            intercepts.reserve(upper.size());
+            for (const auto& p : upper) {
+                intercepts.push_back((p.frequency / p.k) * (p.frequency / p.k)
+                                     - slope * static_cast<double>(p.k) * p.k);
+            }
+            std::nth_element(intercepts.begin(), intercepts.begin() + intercepts.size() / 2, intercepts.end());
+            const double intercept = intercepts[intercepts.size() / 2];
+            if (intercept > 0.0) {
+                const double frameB = std::clamp(slope / intercept, 0.0, kMaxStiffness);
+                // Believed only if the partials then agree. In the frame of
+                // a pluck they are all over the place, any stiffness fits,
+                // and the one that came out (up to the limit) pushed every
+                // reading 10 to 20 cents flat for the next quarter second
+                // while it was smoothed away.
+                std::vector<double> off;
+                off.reserve(upper.size());
+                const double f0b = std::sqrt(intercept);
+                for (const auto& p : upper) {
+                    off.push_back(std::fabs(centsBetween(
+                        p.frequency / (p.k * std::sqrt(1.0 + frameB * p.k * p.k)), f0b)));
+                }
+                std::nth_element(off.begin(), off.begin() + off.size() / 2, off.end());
+                if (off[off.size() / 2] <= kStiffnessFitCents) {
+                    trustedStiffness = true;
+                    stiffness = haveStiffness_
+                        ? stiffness_ + kStiffnessSmoothing * (frameB - stiffness_)
+                        : frameB;
+                }
+            }
         }
     }
 
@@ -602,8 +674,10 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
 
     if (std::fabs(centsBetween(fitted, coarseHz)) > kMaxMoveCents) return false;
 
-    stiffness_ = stiffness;
-    haveStiffness_ = true;
+    if (trustedStiffness) {
+        stiffness_ = stiffness;
+        haveStiffness_ = true;
+    }
     // How much of what is in the window these partials account for. Each
     // partial of amplitude A carries A^2/2; under a Hann window its peak
     // magnitude is A * sum(w) / 2.

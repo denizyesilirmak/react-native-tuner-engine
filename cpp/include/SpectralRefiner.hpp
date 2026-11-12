@@ -61,6 +61,9 @@ public:
     // soundsAnOctaveBelow), else 1.
     int    lastDivisor() const { return lastDivisor_; }
     double lastDominance() const { return lastDominance_; }
+    // The last multiple was decided from what a pluck brought, not from the
+    // spectrum as it stands.
+    bool lastMultipleByArrival() const { return lastByArrival_; }
     // Share of the window's energy the measured partials account for (0..1).
     double lastExplained() const { return lastExplained_; }
     // How many partials the last measurement rested on.
@@ -107,6 +110,7 @@ private:
     int    lastMultiple_ = 1;
     int    lastDivisor_ = 1;
     double lastDominance_ = 0.0;
+    mutable bool lastByArrival_ = false;
     double lastExplained_ = 0.0;
     int    lastPartialCount_ = 0;
 };

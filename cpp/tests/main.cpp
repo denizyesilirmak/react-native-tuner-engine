@@ -1409,6 +1409,29 @@ static void testPulledFundamentalDoesNotOutvoteTheSeries() {
     assert(std::fabs(stats.meanCents) < 1.0);
 }
 
+static void testBodyThumpBelowTheNoteIsNotItsFundamental() {
+    // A nylon A4 came with a thump of the guitar's body near 222 Hz, a third
+    // of a semitone over half the note. The period detector answered with
+    // the octave below, and that peak passed for its fundamental: an A3 with
+    // no third, fifth or seventh partial.
+    constexpr double sr = 48000.0, twoPi = 6.283185307179586;
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    const double amp[] = {1.0, 0.3, 0.25, 0.14, 0.06, 0.05};
+    for (size_t i = 24000; i < input.size(); ++i) {
+        const double t = (i - 24000) / sr;
+        double v = 0.25 * std::exp(-2.0 * t) * std::sin(twoPi * 223.0 * t);
+        for (int k = 1; k <= 6; ++k) {
+            v += amp[k - 1] * std::exp(-(1.0 + 0.4 * k) * t) * std::sin(twoPi * k * 440.0 * t + 0.3 * k);
+        }
+        input[i] += static_cast<float>(0.1 * v);
+    }
+    const auto stats = readStream(input, 440.0, 0.8);
+    std::cout << "A4 over a body thump at 223 Hz: mean " << stats.meanCents << " cents, wrong note "
+              << stats.wrongNote << " of " << (stats.count + stats.wrongNote) << "\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 0.5);
+}
+
 static void testMainsHumIsNotANote() {
     // 50 Hz and its harmonics, steady, with nobody playing: a clean series
     // inside a bass's range.
@@ -1554,6 +1577,7 @@ int main() {
     testWeakFundamentalIsNotReadAnOctaveUp();
     testPulledFundamentalDoesNotOutvoteTheSeries();
     testMainsHumIsNotANote();
+    testBodyThumpBelowTheNoteIsNotItsFundamental();
     testRingingLowStringStaysItself();
 
     // M8 Adaptive Frame Size & Overlap tests

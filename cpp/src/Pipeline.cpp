@@ -7,6 +7,8 @@ static constexpr float kMinLinear = 1e-7f;
 static constexpr float kRefinedEmaAlpha = 0.7f;
 // ...and for a followed note that has become faint: slow whatever the step.
 static constexpr float kFaintEmaAlpha = 0.06f;
+// A step this large in a followed note needs a second frame to agree.
+static constexpr float kStepCents = 4.0f;
 // Mains hum: how close to 50/60/100/120 Hz, how long after a pluck a note is
 // not suspected, and how long hum once heard is remembered.
 static constexpr float kHumCents = 10.0f;
@@ -132,6 +134,9 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // A fresh pluck ends whatever was being followed: the detector decides
     // anew which string it is.
     if (plucked) {
+        // Whatever was waiting to be confirmed belonged to the sound before.
+        unconfirmedHz_ = 0.0f;
+        unconfirmedTries_ = 0;
         if (refine_ && heldFrequency_ > 0.0f) {
             // Over a note in hand a rise in level is not yet a pluck. A note
             // that has sunk to the room's level rides its noise, which
@@ -177,6 +182,7 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // would then keep it there. So for a moment after the pluck the note is
     // asked for once more, and an answer an octave under the one in hand
     // replaces it.
+    const bool watching = pluckWatch_ > 0 && heldFrequency_ > 0.0f;
     if (pluckWatch_ > 0 && heldFrequency_ > 0.0f) {
         --pluckWatch_;
         if (refine_ && det.voiced && det.frequency > 0.0f) {
@@ -211,6 +217,18 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         const float kept = refiner_.refineKnown(heldFrequency_);
         if (kept > 0.0f
             && std::fabs(1200.0f * std::log2(kept / heldFrequency_)) <= kFollowCents) {
+            if (watching && heldFrequency_ > 0.0f
+                && std::fabs(1200.0f * std::log2(kept / heldFrequency_)) > kConfirmCents) {
+                // The same string plucked again: for a few frames the window
+                // holds the attack, and a B3 plucked every 0.3 s read 10 to
+                // 15 cents flat at each stroke. Wait for it to settle.
+                PitchResult nopit;
+                nopit.rmsDb = rmsDb;
+                nopit.stage = PitchStage::Settling;
+                nopit.detectorConfidence = det.confidence;
+                nopit.snrDb = snrDb;
+                return nopit;
+            }
             measuredHz = kept;
             refinedReading = true;
             followed = true;
@@ -219,7 +237,11 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
             // measurement wanders by several cents. Keep the reading and let
             // it move only slowly, instead of dropping the note a second
             // into a three-second ring.
-            faint = refiner_.lastExplained() < kMinFollowExplained;
+            // (Not in the moments after a pluck: there the partials are a
+            // small part of the window because the attack fills it.)
+            faint = refiner_.lastExplained() < kMinFollowExplained
+                && (samplesSincePluck_ < 0
+                    || samplesSincePluck_ > static_cast<int>(kConfirmSeconds * sampleRate_));
             weightedConf = std::max(weightedConf, confidenceThreshold_);
         } else if (pluckWatch_ > 0) {
             // Gone at a rise in level: the pluck was real and what it
@@ -259,6 +281,20 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
             nopit.detectorConfidence = det.confidence;
             nopit.snrDb = snrDb;
             registerMiss();
+            return nopit;
+        }
+        if (refined > 0.0f && refiner_.lastMultiple() > 1 && !refiner_.lastMultipleByArrival()
+            && samplesSincePluck_ >= 0
+            && samplesSincePluck_ <= static_cast<int>(kSettleSeconds * sampleRate_)) {
+            // Raised an octave or more over the detector's word, on the few
+            // periods there are just after a pluck: a banjo's B showed as
+            // the B above for two frames, until its odd partials could be
+            // made out. Not shown until the note has settled.
+            PitchResult nopit;
+            nopit.rmsDb = rmsDb;
+            nopit.stage = PitchStage::Settling;
+            nopit.detectorConfidence = det.confidence;
+            nopit.snrDb = snrDb;
             return nopit;
         }
         if (refined > 0.0f) {
@@ -352,6 +388,25 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
                 return nopit;
             }
         }
+    }
+
+    // A followed note does not leap. Turning a peg moves it frame after
+    // frame in one direction; a single frame 5 or 10 cents away, back the
+    // next, is one partial caught in the room's noise at the end of a ring.
+    // A step waits one frame for the next to go the same way.
+    if (followed && !faint && heldFrequency_ > 0.0f) {
+        const float cents = 1200.0f * std::log2(measuredHz / heldFrequency_);
+        const int direction = cents > 0.0f ? 1 : -1;
+        if (std::fabs(cents) < kStepCents) {
+            pendingStep_ = 0;
+        } else if (pendingStep_ == direction) {
+            pendingStep_ = 0;               // borne out: take it
+        } else {
+            pendingStep_ = direction;
+            measuredHz = heldFrequency_;    // not yet
+        }
+    } else {
+        pendingStep_ = 0;
     }
 
     // A faint note is where it was: a dying string does not change pitch,

@@ -88,6 +88,9 @@ private:
     int pluckWatch_ = 0;
     // A new note's first measurement, waiting for a second to agree with it.
     float unconfirmedHz_ = 0.0f;
+    // Direction (+1/-1) of a sudden step in a followed note that is waiting
+    // for the next frame to bear it out; 0 when none is.
+    int   pendingStep_ = 0;
     // Mains hum heard in the room (its frequency), and for how many more
     // frames that is remembered.
     float humHz_ = 0.0f;
