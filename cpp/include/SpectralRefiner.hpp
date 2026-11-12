@@ -71,7 +71,9 @@ private:
                  double& outSteadiness) const;
     // One attempt at a given window length; false when too few partials are
     // steady in it (the note is younger than the window).
-    bool refineWith(int length, double coarseHz, double& outHz, int minPartials = 1);
+    // `known`: coarseHz is the note's last reading, not a detector's guess.
+    bool refineWith(int length, double coarseHz, double& outHz, int minPartials = 1,
+                    bool known = false);
     const std::vector<double>& windowFor(int length) const;
     int shortestWindowFor(double hz) const;
     int dominantMultiple(int length, double coarseHz, int samplesSincePluck,
@@ -82,6 +84,8 @@ private:
     // what lies just beside it. `spacingHz` is the distance to the next
     // partial of the same series, so the comparison stays between them.
     bool standsOut(int length, double hz, double magnitude, double spacingHz) const;
+    // How many times over its own surroundings a peak stands.
+    double prominence(int length, double hz, double magnitude, double spacingHz) const;
     // True when the sound is really an octave below `hz`: partials sit half
     // way between its multiples.
     bool soundsAnOctaveBelow(int length, double hz, int samplesSincePluck) const;

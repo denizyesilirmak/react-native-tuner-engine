@@ -38,6 +38,9 @@ constexpr double kMinSteadiness     = 0.85;
 constexpr double kMinEarlyToLate    = 0.8;
 // A partial this far from the fitted series is being hit by something else.
 constexpr double kOutlierCents      = 3.0;
+// Share of the vote that keeps a followed note with the partials it has
+// been read from.
+constexpr double kStayShare         = 0.35;
 // The refined pitch may not leave the neighbourhood of the coarse one.
 constexpr double kMaxMoveCents      = 60.0;
 // Stiffness of real strings; beyond this the fit is following noise.
@@ -56,6 +59,8 @@ constexpr double kPresentFraction   = 0.03;
 // partial, and noise then passed for a fundamental: a ringing B3 was read as
 // B1, a G3 as C2, on a phone recording.
 constexpr double kNoiseFactor       = 3.0;
+// A peak this many times over its surroundings is as clear as a peak gets.
+constexpr double kClearFactor = 20.0;
 // Where beside a peak its surroundings are sampled, in bins: just past the
 // Hann main lobe (2 bins).
 constexpr double kSideBins          = 2.5;
@@ -194,6 +199,14 @@ bool SpectralRefiner::standsOut(int length, double hz, double magnitude, double 
     double beside = magnitudeAt(length, hz + offset);
     if (hz - offset > 20.0) beside = std::max(beside, magnitudeAt(length, hz - offset));
     return magnitude >= kNoiseFactor * beside;
+}
+
+double SpectralRefiner::prominence(int length, double hz, double magnitude, double spacingHz) const {
+    const double binHz = static_cast<double>(sampleRate_) / length;
+    const double offset = std::min(kSideBins * binHz, 0.5 * spacingHz);
+    double beside = magnitudeAt(length, hz + offset);
+    if (hz - offset > 20.0) beside = std::max(beside, magnitudeAt(length, hz - offset));
+    return beside > 0.0 ? magnitude / beside : 1.0e6;
 }
 
 double SpectralRefiner::magnitudeBefore(int length, double hz, int endOffset) const {
@@ -407,10 +420,10 @@ float SpectralRefiner::refineKnown(float knownHz) {
     for (int length = knownHz < kLowNoteHz ? longest_ : longest_ / 2; length >= shortest; length /= 2) {
         if (filled_ < length + length / kHopDivisor) continue;
         double hz = 0.0;
-        if (refineWith(length, knownHz, hz, needed)) return static_cast<float>(hz);
+        if (refineWith(length, knownHz, hz, needed, true)) return static_cast<float>(hz);
         // A pure tone is followed by its one partial, on the same terms it
         // was accepted on.
-        if (needed > 1 && refineWith(length, knownHz, hz, 1)
+        if (needed > 1 && refineWith(length, knownHz, hz, 1, true)
             && lastExplained_ >= kLonePartialExplained) {
             return static_cast<float>(hz);
         }
@@ -418,7 +431,8 @@ float SpectralRefiner::refineKnown(float knownHz) {
     return 0.0f;
 }
 
-bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int minPartials) {
+bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int minPartials,
+                                 bool known) {
     partials_.clear();
     // A different note: its stiffness is not the last one's.
     if (lastF0_ > 0.0 && std::fabs(centsBetween(coarseHz, lastF0_)) > 80.0) resetString();
@@ -473,12 +487,15 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
 
     // Keep the partials that are steady and strong enough.
     std::vector<Partial> used;
+    std::vector<double> clarity;   // of each used partial, 0..1
     used.reserve(partials_.size());
+    clarity.reserve(partials_.size());
     for (const auto& p : partials_) {
-        if (p.steadiness >= kMinSteadiness && p.magnitude >= kMinRelativeMagnitude * strongest
-            && standsOut(length, p.frequency, p.magnitude, coarseHz)) {
-            used.push_back(p);
-        }
+        if (p.steadiness < kMinSteadiness || p.magnitude < kMinRelativeMagnitude * strongest) continue;
+        const double over = prominence(length, p.frequency, p.magnitude, coarseHz);
+        if (over < kNoiseFactor) continue;
+        used.push_back(p);
+        clarity.push_back(std::min(1.0, over / kClearFactor));
     }
     // One partial is enough when it is the fundamental itself: a pure tone
     // (tuning fork, whistle, a note near the top of the range) has no more.
@@ -535,8 +552,18 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
     std::vector<Vote> votes;
     votes.reserve(used.size());
     double totalWeight = 0.0;
-    for (const auto& p : used) {
-        const double weight = p.magnitude * std::min(p.k, 6);
+    for (size_t i = 0; i < used.size(); ++i) {
+        const auto& p = used[i];
+        // A vote, not a measure of loudness. On a phone the fundamental of
+        // a B3 stood 20 dB over its second and third partials and sat 10
+        // cents over them for half a second after the pluck (the guitar's
+        // top resonates there and pulls it), while those two agreed to a
+        // cent from the first frame on what the string settled to. Weighted
+        // by magnitude, the loudest partial is the whole vote. What a vote
+        // is worth is how clearly the peak stands over its surroundings: a
+        // partial barely out of the room's noise had 322 Hz to say about a
+        // 329 Hz string.
+        const double weight = std::sqrt(p.magnitude) * std::min(p.k, 6) * clarity[i] * clarity[i];
         votes.push_back({p.frequency / (p.k * std::sqrt(1.0 + stiffness * p.k * p.k)), weight});
         totalWeight += weight;
     }
@@ -545,6 +572,18 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
     for (const auto& v : votes) {
         running += v.weight;
         if (running >= 0.5 * totalWeight) { median = v.f0; break; }
+    }
+    // When the partials fall into two camps (a fundamental the guitar's top
+    // has pulled 8 cents from the series, on a G string for the whole note),
+    // the median changes camp as their levels change and the reading steps
+    // by several cents. A note being followed stays with the camp it is in
+    // while that camp still holds a fair share of the vote.
+    if (known) {
+        double near = 0.0;
+        for (const auto& v : votes) {
+            if (std::fabs(centsBetween(v.f0, coarseHz)) <= kOutlierCents) near += v.weight;
+        }
+        if (near >= kStayShare * totalWeight) median = coarseHz;
     }
     double agreeing = 0.0, agreeingWeight = 0.0;
     for (const auto& v : votes) {

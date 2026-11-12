@@ -1129,7 +1129,9 @@ static void testNewNoteAfterSilenceIsNotThePreviousOne() {
               << " first pitched frame=" << firstPitched << "\n";
 
     assert(wrongNote == 0);
-    assert(firstPitched >= 0 && firstPitched <= 1);
+    // The third frame at the latest: a new note is shown once two
+    // measurements agree.
+    assert(firstPitched >= 0 && firstPitched <= 2);
 }
 
 static void testNoteChangeReportsNoPhantomNotes() {
@@ -1382,6 +1384,53 @@ static void testNoteOverRingingFourthIsRead() {
     assert(std::fabs(stats.meanCents) < 0.3);
 }
 
+static void testPulledFundamentalDoesNotOutvoteTheSeries() {
+    // On a phone recording of a guitar the fundamental of the B string stood
+    // 20 dB over the next partials and 10 cents over the series for half a
+    // second (the top resonates there); G was the same, 8 cents under, for
+    // the whole note. The partials above agree on where the string is.
+    constexpr double sr = 48000.0, twoPi = 6.283185307179586;
+    constexpr double f0 = 246.94;
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    const double amp[] = {1.0, 0.1, 0.12, 0.03, 0.05, 0.04};
+    for (size_t i = 24000; i < input.size(); ++i) {
+        const double t = (i - 24000) / sr;
+        double v = 0.0;
+        for (int k = 1; k <= 6; ++k) {
+            const double f = k * f0 * (k == 1 ? std::pow(2.0, 10.0 / 1200.0) : 1.0);
+            v += amp[k - 1] * std::exp(-1.5 * t) * std::sin(twoPi * f * t + 0.4 * k);
+        }
+        input[i] += static_cast<float>(0.1 * v);
+    }
+    const auto stats = readStream(input, f0, 0.8);
+    std::cout << "B3, fundamental 10 cents over its series: mean " << stats.meanCents
+              << " cents over " << stats.count << " readings\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 1.0);
+}
+
+static void testMainsHumIsNotANote() {
+    // 50 Hz and its harmonics, steady, with nobody playing: a clean series
+    // inside a bass's range.
+    constexpr double sr = 48000.0, twoPi = 6.283185307179586;
+    constexpr int n = 4096;
+    std::vector<float> input = generateNoise(48000 * 3, -70.0f);
+    for (size_t i = 0; i < input.size(); ++i) {
+        const double t = i / sr;
+        input[i] += static_cast<float>(0.01 * (std::sin(twoPi * 50 * t)
+            + 0.5 * std::sin(twoPi * 100 * t + 1) + 0.3 * std::sin(twoPi * 150 * t + 2)));
+    }
+    TunerEngine engine(48000.0f, n);
+    engine.setFrequencyRange(30.0f, 400.0f);
+    engine.setHpfCutoff(25.0f);
+    int pitched = 0;
+    for (size_t p = 0; p + n <= input.size(); p += n) {
+        if (engine.process(input.data() + p, n).hasPitch) ++pitched;
+    }
+    std::cout << "mains hum alone, bass range: " << pitched << " pitched frames\n";
+    assert(pitched == 0);
+}
+
 static void testWeakFundamentalIsNotReadAnOctaveUp() {
     // A string whose even partials carry over 90 % of the energy (a real
     // nylon E4 does). Judged by energy it is an E5; its weak fundamental says
@@ -1503,6 +1552,8 @@ int main() {
     testRingingNeighbourDoesNotMoveTheReading();
     testNoteOverRingingFourthIsRead();
     testWeakFundamentalIsNotReadAnOctaveUp();
+    testPulledFundamentalDoesNotOutvoteTheSeries();
+    testMainsHumIsNotANote();
     testRingingLowStringStaysItself();
 
     // M8 Adaptive Frame Size & Overlap tests

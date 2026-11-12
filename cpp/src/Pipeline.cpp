@@ -7,6 +7,19 @@ static constexpr float kMinLinear = 1e-7f;
 static constexpr float kRefinedEmaAlpha = 0.7f;
 // ...and for a followed note that has become faint: slow whatever the step.
 static constexpr float kFaintEmaAlpha = 0.06f;
+// Mains hum: how close to 50/60/100/120 Hz, how long after a pluck a note is
+// not suspected, and how long hum once heard is remembered.
+static constexpr float kHumCents = 10.0f;
+static constexpr float kHumNoPluckSeconds = 1.0f;
+static constexpr float kHumMemorySeconds = 30.0f;
+// A new note's first two measurements must agree this closely, for at most
+// this many attempts.
+static constexpr float kConfirmCents = 3.0f;
+static constexpr int   kConfirmMaxTries = 3;
+// ...and only this soon after a pluck; a note met in mid-ring is steady.
+static constexpr float kConfirmSeconds = 0.5f;
+// The furthest one faint frame's measurement may sit from the reading.
+static constexpr float kFaintMaxStepCents = 8.0f;
 static constexpr float kRefineGraceSeconds = 0.25f;
 // A subharmonic correction is only believed when the corrected note's
 // partials make up most of the sound.
@@ -28,7 +41,7 @@ static constexpr int kPluckCooldownFrames = 3;
 static constexpr float kFollowCents = 50.0f;
 // A followed note's partials must still account for this share of the window;
 // under it the reading is noise with the note's name on it.
-static constexpr float kMinFollowExplained = 0.25f;
+static constexpr float kMinFollowExplained = 0.4f;
 
 // True when `hz` is a simple multiple or fraction of `base` (an octave, a
 // twelfth, two octaves... within about 50 cents). The same note is not.
@@ -136,6 +149,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     } else if (samplesSincePluck_ >= 0 && samplesSincePluck_ < (1 << 28)) {
         samplesSincePluck_ += frameSize_;
     }
+
+    if (humFrames_ > 0) --humFrames_;
 
     // --- Pitch detection ---
     DetectorResult det = detector_->detect(workBuffer_.data(), frameSize_, sampleRate_);
@@ -249,6 +264,13 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         if (refined > 0.0f) {
             measuredHz = refined;
             refinedReading = true;
+            // Found again by the detector with no pluck in between: the same
+            // string, too faint to follow a moment ago. Still faint.
+            if (heldFrequency_ > 0.0f && pluckWatch_ == 0
+                && samplesSincePluck_ > static_cast<int>(kSettleSeconds * sampleRate_)
+                && std::fabs(1200.0f * std::log2(refined / heldFrequency_)) <= kFollowCents) {
+                faint = true;
+            }
             if (refiner_.lastPartialCount() >= 2 && refiner_.lastExplained() >= kMinExplained) {
                 // The detector proposes, the spectrum confirms. A low string
                 // whose second partial dwarfs its fundamental leaves the
@@ -332,6 +354,62 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         }
     }
 
+    // A faint note is where it was: a dying string does not change pitch,
+    // only its measurement gets worse (27 cents off in single frames at the
+    // room's level). Such a frame may nudge the reading, not move it.
+    if (faint && heldFrequency_ > 0.0f) {
+        const float cents = 1200.0f * std::log2(measuredHz / heldFrequency_);
+        if (std::fabs(cents) > kFaintMaxStepCents) {
+            measuredHz = heldFrequency_
+                * std::pow(2.0f, std::copysign(kFaintMaxStepCents, cents) / 1200.0f);
+        }
+    }
+
+    if (measuredHz > 0.0f && (heldFrequency_ <= 0.0f || bornWithoutPluck_) && isMainsHum(measuredHz)) {
+        // 50 or 60 Hz, or twice that, to within a few cents, and no pluck
+        // brought it: the mains, through an amplifier or a lamp. It has a
+        // clean series and never decays, so nothing else tells it from a
+        // bass string. Remembered, so that a pluck does not make it one.
+        // (A note that began with no pluck may have been taken up a few
+        // cents off, before it could be measured; it is judged again here.)
+        const bool noPluck = heldFrequency_ > 0.0f || samplesSincePluck_ < 0
+            || samplesSincePluck_ > static_cast<int>(kHumNoPluckSeconds * sampleRate_);
+        if (noPluck) {
+            humHz_ = measuredHz;
+            humFrames_ = static_cast<int>(kHumMemorySeconds * sampleRate_ / frameSize_);
+        }
+        if (noPluck || humFrames_ > 0) {
+            PitchResult nopit;
+            nopit.rmsDb = rmsDb;
+            nopit.stage = PitchStage::Unvoiced;
+            nopit.detectorConfidence = det.confidence;
+            nopit.snrDb = snrDb;
+            if (heldFrequency_ > 0.0f) resetTracking(); else registerMiss();
+            fadedHz_ = 0.0f;
+            return nopit;
+        }
+    }
+    // A new note's first measurement is taken while the string is still
+    // settling from the pluck and can sit 5 to 20 cents from the second one.
+    // It is shown once a second measurement agrees with it.
+    if (refinedReading && heldFrequency_ <= 0.0f && samplesSincePluck_ >= 0
+        && samplesSincePluck_ <= static_cast<int>(kConfirmSeconds * sampleRate_)) {
+        const bool agrees = unconfirmedHz_ > 0.0f
+            && std::fabs(1200.0f * std::log2(measuredHz / unconfirmedHz_)) <= kConfirmCents;
+        if (!agrees && unconfirmedTries_ < kConfirmMaxTries) {
+            unconfirmedHz_ = measuredHz;
+            ++unconfirmedTries_;
+            PitchResult nopit;
+            nopit.rmsDb = rmsDb;
+            nopit.stage = PitchStage::Settling;
+            nopit.detectorConfidence = det.confidence;
+            nopit.snrDb = snrDb;
+            return nopit;
+        }
+    }
+    unconfirmedHz_ = 0.0f;
+    unconfirmedTries_ = 0;
+
     // --- Post-process: median + EMA + hysteresis ---
     // A refined reading is already steady frame to frame; heavy smoothing
     // would only make it lag the string.
@@ -353,6 +431,10 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // The mapper's cents follow A4 and the temperament; the post-processor's
     // are equal-temperament only, and its frequency now stays inside one note.
     PitchResult result = noteMapper_.map(pp.frequency, weightedConf, rmsDb);
+    if (heldFrequency_ <= 0.0f) {
+        bornWithoutPluck_ = samplesSincePluck_ < 0
+            || samplesSincePluck_ > static_cast<int>(kHumNoPluckSeconds * sampleRate_);
+    }
     heldFrequency_ = pp.frequency;
     missedFrames_  = 0;
     result.stage = PitchStage::Ok;
@@ -429,6 +511,13 @@ void Pipeline::clearHold() {
 
 void Pipeline::registerMiss() {
     if (++missedFrames_ > noteHold_.maxMissedFrames) resetTracking();
+}
+
+bool Pipeline::isMainsHum(float hz) const {
+    for (float mains : {50.0f, 60.0f, 100.0f, 120.0f}) {
+        if (std::fabs(1200.0f * std::log2(hz / mains)) <= kHumCents) return true;
+    }
+    return false;
 }
 
 void Pipeline::resetTracking() {
