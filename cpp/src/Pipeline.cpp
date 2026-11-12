@@ -16,6 +16,11 @@ static constexpr float kMinExplained = 0.6f;
 static constexpr float kRangeSlack = 0.97f;
 // A rise in level this large over the recent envelope is a fresh pluck.
 static constexpr float kPluckRiseDb = 6.0f;
+// A rise in level over a note in hand is judged for this many frames.
+static constexpr int kPluckWatchFrames = 4;
+// How long after a pluck the octave of the note in hand may still be
+// corrected downwards.
+static constexpr float kSettleSeconds = 0.3f;
 // Frames after a pluck in which another is not looked for (the attack itself
 // keeps rising for a frame or two).
 static constexpr int kPluckCooldownFrames = 3;
@@ -114,8 +119,18 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // A fresh pluck ends whatever was being followed: the detector decides
     // anew which string it is.
     if (plucked) {
-        resetTracking();
-        fadedHz_ = 0.0f;
+        if (refine_ && heldFrequency_ > 0.0f) {
+            // Over a note in hand a rise in level is not yet a pluck. A note
+            // that has sunk to the room's level rides its noise, which
+            // swings by 6 dB and more from frame to frame; each swing used
+            // to end the note. The note stays until a new one shows itself.
+            pluckWatch_ = kPluckWatchFrames;
+            decidedAtPluck_ = false;
+        } else {
+            resetTracking();
+            fadedHz_ = 0.0f;
+            decidedAtPluck_ = true;
+        }
         // The pluck fell somewhere in this frame; count from its start.
         samplesSincePluck_ = frameSize_;
     } else if (samplesSincePluck_ >= 0 && samplesSincePluck_ < (1 << 28)) {
@@ -141,6 +156,42 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     bool refinedReading = false;
     bool followed = false;
     bool faint = false;
+    // The first decision after a pluck rests on a few periods, too short a
+    // stretch to show a weak fundamental: a string whose even partials carry
+    // nearly all of its energy is taken for the octave above, and following
+    // would then keep it there. So for a moment after the pluck the note is
+    // asked for once more, and an answer an octave under the one in hand
+    // replaces it.
+    if (pluckWatch_ > 0 && heldFrequency_ > 0.0f) {
+        --pluckWatch_;
+        if (refine_ && det.voiced && det.frequency > 0.0f) {
+            const float fresh = refiner_.refine(det.frequency, samplesSincePluck_);
+            if (fresh >= minHz_ * kRangeSlack && fresh <= maxHz_ / kRangeSlack
+                && refiner_.lastPartialCount() >= 2
+                && refiner_.lastExplained() >= kMinExplained) {
+                // A clean series that is most of the sound: a string was
+                // plucked, the same one or another. Start over from it.
+                resetTracking();
+                fadedHz_ = 0.0f;
+                pluckWatch_ = 0;
+                decidedAtPluck_ = true;
+            }
+        }
+    } else if (heldFrequency_ <= 0.0f) {
+        pluckWatch_ = 0;
+    }
+    if (decidedAtPluck_ && refine_ && heldFrequency_ > 0.0f && det.voiced && det.frequency > 0.0f
+        && samplesSincePluck_ >= 0
+        && samplesSincePluck_ <= static_cast<int>(kSettleSeconds * sampleRate_)) {
+        const float again = refiner_.refine(det.frequency, samplesSincePluck_);
+        if (again > 0.0f && again >= minHz_ * kRangeSlack
+            && refiner_.lastPartialCount() >= 2
+            && refiner_.lastExplained() >= kMinExplained
+            && std::fabs(1200.0f * std::log2(again / (0.5f * heldFrequency_))) <= kFollowCents) {
+            postProcessor_.reset();
+            heldFrequency_ = again;
+        }
+    }
     if (refine_ && heldFrequency_ > 0.0f) {
         const float kept = refiner_.refineKnown(heldFrequency_);
         if (kept > 0.0f
@@ -155,6 +206,13 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
             // into a three-second ring.
             faint = refiner_.lastExplained() < kMinFollowExplained;
             weightedConf = std::max(weightedConf, confidenceThreshold_);
+        } else if (pluckWatch_ > 0) {
+            // Gone at a rise in level: the pluck was real and what it
+            // brought is not readable yet. Nothing of the old note is owed.
+            resetTracking();
+            fadedHz_ = 0.0f;
+            pluckWatch_ = 0;
+            decidedAtPluck_ = true;
         } else {
             fadedHz_ = heldFrequency_;
         }

@@ -83,6 +83,11 @@ private:
     float fadedHz_ = 0.0f;
     // Samples since the level last jumped; -1 before the first pluck.
     int samplesSincePluck_ = -1;
+    // Frames left in which a rise in level over a note in hand is still
+    // being judged: a new pluck, or only the room.
+    int pluckWatch_ = 0;
+    // The note in hand was decided after the last pluck (not carried over it).
+    bool decidedAtPluck_ = true;
     float minHz_ = 60.0f;   // the detector's range, to hold corrections to
     float maxHz_ = 1200.0f;
     NoteMapper noteMapper_;
