@@ -23,6 +23,14 @@ const QUALITY_PRESETS: Record<
   'high-accuracy': { frameSize: 4096, overlapRatio: 0.75 },
 };
 
+const listeners = new Set<PitchCallback>();
+let legacySubscription: { remove: () => void } | null = null;
+
+const dispatch = (event: PitchEvent) => {
+  // Copy: a listener may unsubscribe while being called.
+  for (const listener of Array.from(listeners)) listener(event);
+};
+
 class TunerEngine {
   configure(opts: TunerConfig): Promise<void> {
     const { quality, adaptiveFrameSize, ...rest } = opts;
@@ -95,24 +103,28 @@ class TunerEngine {
   }
 
   onPitch(callback: PitchCallback): Unsubscribe {
-    // Primary path (both platforms): JSI direct callback via C++ invokeAsync.
-    // The native side calls __tunerEngineOnPitch directly on the JS thread,
-    // matching iOS latency on Android Bridgeless / New Arch.
-    (globalThis as any).__tunerEngineOnPitch = callback;
-
-    if (Platform.OS === 'ios') {
-      // Old-arch iOS fallback: DeviceEventEmitter fires when JSI global is absent.
-      const sub = DeviceEventEmitter.addListener('onPitch', callback);
-      return () => {
-        (globalThis as any).__tunerEngineOnPitch = undefined;
-        sub.remove();
-      };
+    // Every subscriber gets every event. There used to be a single slot, so a
+    // second onPitch() silently replaced the first and either unsubscribe
+    // silenced both.
+    listeners.add(callback);
+    if (listeners.size === 1) {
+      // Primary path (both platforms): JSI direct callback via C++ invokeAsync.
+      (globalThis as any).__tunerEngineOnPitch = dispatch;
+      if (Platform.OS === 'ios') {
+        // Old-arch iOS fallback: DeviceEventEmitter fires when JSI global is absent.
+        legacySubscription = DeviceEventEmitter.addListener(
+          'onPitch',
+          dispatch
+        );
+      }
     }
 
     return () => {
+      if (!listeners.delete(callback) || listeners.size > 0) return;
       (globalThis as any).__tunerEngineOnPitch = undefined;
+      legacySubscription?.remove();
+      legacySubscription = null;
     };
   }
 }
-
 export default new TunerEngine();
