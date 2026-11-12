@@ -685,7 +685,11 @@ bool SpectralRefiner::refineWith(int length, double coarseHz, double& outHz, int
         // is worth is how clearly the peak stands over its surroundings: a
         // partial barely out of the room's noise had 322 Hz to say about a
         // 329 Hz string.
-        const double weight = std::sqrt(p.magnitude) * std::min(p.k, 6) * clarity[i] * clarity[i];
+        // A higher partial says more about the fundamental (its error is
+        // divided by k), but only once the stiffness that stretches it is
+        // known; until then it counts no more than a low one.
+        const double leverage = lowOnly ? 1.0 : std::min(p.k, 6);
+        const double weight = std::sqrt(p.magnitude) * leverage * clarity[i] * clarity[i];
         const double raw = p.frequency / (p.k * std::sqrt(1.0 + stiffness * p.k * p.k));
         // A low partial the instrument's body pulls away from the rest (the
         // fundamental of a G string, 8 cents, for the whole note) is put

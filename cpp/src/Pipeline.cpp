@@ -598,7 +598,10 @@ bool Pipeline::isMainsHum(float hz) const {
 void Pipeline::resetTracking() {
     if (heldFrequency_ > 0.0f) fadedHz_ = heldFrequency_;
     postProcessor_.reset();
-    refiner_.resetString();
+    // What the refiner has learned about the string (its stiffness, how far
+    // the body pulls its low partials) is kept: the same string plucked
+    // again is the usual case, and the refiner drops it by itself when the
+    // next note is another one.
     unrefinedFrames_ = 0;
     fineOverCoarse_ = 0.0f;
     clearHold();
