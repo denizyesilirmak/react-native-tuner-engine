@@ -5,6 +5,8 @@
 
 static constexpr float kMinLinear = 1e-7f;
 static constexpr float kRefinedEmaAlpha = 0.7f;
+// ...and for a followed note that has become faint: slow whatever the step.
+static constexpr float kFaintEmaAlpha = 0.06f;
 static constexpr float kRefineGraceSeconds = 0.25f;
 // A subharmonic correction is only believed when the corrected note's
 // partials make up most of the sound.
@@ -52,9 +54,17 @@ bool Pipeline::detectPluck(float rmsDb) {
         for (int i = 1; i < recentCount_; ++i) quietest = std::min(quietest, recentDb_[i]);
         plucked = rmsDb - quietest >= kPluckRiseDb;
     }
-    recentDb_[recentIndex_] = rmsDb;
-    recentIndex_ = (recentIndex_ + 1) % kPluckHistory;
-    if (recentCount_ < kPluckHistory) ++recentCount_;
+    if (plucked) {
+        // The quiet frames before this pluck must not be what the next few
+        // frames are compared with, or the same pluck is found again as soon
+        // as the cooldown ends.
+        for (int i = 0; i < kPluckHistory; ++i) recentDb_[i] = rmsDb;
+        recentCount_ = kPluckHistory;
+    } else {
+        recentDb_[recentIndex_] = rmsDb;
+        recentIndex_ = (recentIndex_ + 1) % kPluckHistory;
+        if (recentCount_ < kPluckHistory) ++recentCount_;
+    }
     framesSincePluck_ = plucked ? 0 : std::min(framesSincePluck_ + 1, 1 << 20);
     return plucked;
 }
@@ -130,14 +140,20 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     float measuredHz = det.frequency;
     bool refinedReading = false;
     bool followed = false;
+    bool faint = false;
     if (refine_ && heldFrequency_ > 0.0f) {
         const float kept = refiner_.refineKnown(heldFrequency_);
         if (kept > 0.0f
-            && refiner_.lastExplained() >= kMinFollowExplained
             && std::fabs(1200.0f * std::log2(kept / heldFrequency_)) <= kFollowCents) {
             measuredHz = kept;
             refinedReading = true;
             followed = true;
+            // Sinking into the room: its partials still stand out, but they
+            // are a small part of what the microphone hears and each frame's
+            // measurement wanders by several cents. Keep the reading and let
+            // it move only slowly, instead of dropping the note a second
+            // into a three-second ring.
+            faint = refiner_.lastExplained() < kMinFollowExplained;
             weightedConf = std::max(weightedConf, confidenceThreshold_);
         } else {
             fadedHz_ = heldFrequency_;
@@ -262,7 +278,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // A refined reading is already steady frame to frame; heavy smoothing
     // would only make it lag the string.
     PostProcessor::Result pp = postProcessor_.process(
-        measuredHz, weightedConf, refinedReading ? kRefinedEmaAlpha : -1.0f, refinedReading);
+        measuredHz, weightedConf,
+        refinedReading ? (faint ? kFaintEmaAlpha : kRefinedEmaAlpha) : -1.0f, refinedReading);
 
     if (!pp.isStable || pp.frequency <= 0.0f) {
         registerMiss();
