@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace {
 
@@ -32,6 +33,10 @@ constexpr float kSubharmonicDepthSlack = 0.1f;
 // noise cannot trigger it.
 constexpr float kNearPerfectDepth = 0.03f;
 constexpr float kRepairDepthMargin = 0.01f;
+
+// Local minima within this fraction of the winner's lag belong to the same
+// dip (about two thirds of a semitone either side).
+constexpr float kSameDipFraction = 0.04f;
 
 // True when `lag` is (within 3 %) an integer multiple, 1..8, of `base`.
 bool isMultipleOf(int lag, int base) {
@@ -192,6 +197,23 @@ DetectorResult PyinPitchDetector::detect(const float* frame, int frameLength, fl
             winner = &candidate;
             break;
         }
+    }
+
+    // Noise splits one CMND dip into several local minima a few samples
+    // apart. The threshold rule above credits the FIRST minimum under each
+    // threshold, so within a split dip the mass always lands on the shortest
+    // lag: a systematic sharp bias that grows as the note decays (E2 read
+    // +7 cents at 14 dB SNR, +28 at 10 dB; bass E1 +17 and +47). The mass has
+    // done its job of choosing the dip; the reading comes from its deepest
+    // point.
+    {
+        const int radius = std::max(2, static_cast<int>(kSameDipFraction * static_cast<float>(winner->lag)));
+        const PitchCandidate* deepestInDip = winner;
+        for (const auto& candidate : candidates_) {
+            if (std::abs(candidate.lag - winner->lag) > radius) continue;
+            if (candidate.cmndDepth < deepestInDip->cmndDepth) deepestInDip = &candidate;
+        }
+        winner = deepestInDip;
     }
 
     const float refinedLag = refineLagByParabola(winner->lag);

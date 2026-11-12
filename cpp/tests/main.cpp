@@ -1236,6 +1236,46 @@ static void testOverlapDoesNotBiasLowStrings() {
     assert(std::fabs(withHop) < 0.5f);
 }
 
+static void testPyinNoSharpBiasInNoise() {
+    // Noise splits a CMND dip into several local minima and the threshold rule
+    // credits the first, i.e. the shortest lag. Averaged over many noise
+    // realisations a low E at 14 dB SNR read about 7 cents sharp.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr float hz = 82.407f;
+    constexpr int   frames = 20;
+    constexpr int   seeds  = 24;
+
+    auto tone = generateHarmonicTone(hz, sr, n * frames);
+    const float toneRms = rmsOf(tone.data(), static_cast<int>(tone.size()));
+    const float noiseDb = 20.0f * std::log10(toneRms) - 14.0f;
+
+    double sum = 0.0;
+    int count = 0;
+    for (int seed = 1; seed <= seeds; ++seed) {
+        auto input = generateNoise(n * frames, noiseDb, 0x1234u + static_cast<uint32_t>(seed));
+        for (size_t i = 0; i < input.size(); ++i) input[i] += tone[i];
+
+        PyinPitchDetector detector(sr, n);
+        detector.setFrequencyRange(55.0f, 1320.0f);
+        for (int f = 0; f < frames; ++f) {
+            auto r = detector.detect(input.data() + f * n, n, sr);
+            if (!r.voiced) continue;
+            const double cents = 1200.0 * std::log2(r.frequency / hz);
+            if (std::fabs(cents) > 100.0) continue; // octave errors are not this test
+            sum += cents;
+            ++count;
+        }
+    }
+    const double mean = sum / count;
+
+    std::cout << "pYIN E2 at 14 dB SNR: mean error " << mean << " cents over "
+              << count << " frames\n";
+
+    assert(count > seeds * frames / 2);
+    assert(std::fabs(mean) < 1.5);
+}
+
 int main() {
     testNoteMapper();
 
@@ -1296,6 +1336,7 @@ int main() {
     testCentsFollowA4();
     testJustTemperamentCentsReachTheResult();
     testOverlapDoesNotBiasLowStrings();
+    testPyinNoSharpBiasInNoise();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();
