@@ -14,8 +14,22 @@ Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetect
     , workBuffer_(static_cast<size_t>(frameSize))
 {}
 
-PitchResult Pipeline::process(const float* input, int frameCount) {
+PitchResult Pipeline::process(const float* input, int frameCount, int newSamples) {
     if (!input || frameCount < frameSize_) return PitchResult{};
+
+    // --- High-pass, before the gate so the filter sees every sample once.
+    // Overlapping frames only filter their new tail: running the stateful
+    // filter over the overlap again biased low strings by up to 2.5 cents.
+    if (workPrimed_ && newSamples > 0 && newSamples < frameSize_) {
+        const int retain = frameSize_ - newSamples;
+        std::copy(workBuffer_.begin() + newSamples, workBuffer_.end(), workBuffer_.begin());
+        std::copy(input + retain, input + frameSize_, workBuffer_.begin() + retain);
+        hpf_.process(workBuffer_.data() + retain, newSamples);
+    } else {
+        std::copy(input, input + frameSize_, workBuffer_.begin());
+        hpf_.process(workBuffer_.data(), frameSize_);
+        workPrimed_ = true;
+    }
 
     // --- RMS gate ---
     const float rmsLinear = calculateRmsLinear(input, frameSize_);
@@ -24,7 +38,9 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     if (rmsDb < noiseGateDb_) {
         // Gated frames are the best view of the room's noise floor.
         snr_.update(rmsLinear, false);
-        clearHold();
+        // Silence ends the note: the next one must not start from the median
+        // and EMA of the last, or it reads as the old string for a few frames.
+        resetTracking();
         PitchResult silent;
         silent.rmsDb = rmsDb;
         silent.stage = PitchStage::Gated;
@@ -36,12 +52,6 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
         postProcessor_.reset();
         clearHold();
     }
-
-    // --- Working copy: HPF only.
-    // Hann windowing is reserved for FFT-based detectors (M3 cepstrum/PYIN).
-    // YIN works in the time domain — windowing distorts its difference function.
-    std::copy(input, input + frameSize_, workBuffer_.begin());
-    hpf_.process(workBuffer_.data(), frameSize_);
 
     // --- Pitch detection ---
     DetectorResult det = detector_->detect(workBuffer_.data(), frameSize_, sampleRate_);
@@ -86,9 +96,9 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
     }
 
     // --- Note mapping ---
+    // The mapper's cents follow A4 and the temperament; the post-processor's
+    // are equal-temperament only, and its frequency now stays inside one note.
     PitchResult result = noteMapper_.map(pp.frequency, weightedConf, rmsDb);
-    // Override cents with the hysteresis-stabilised value from PostProcessor
-    result.cents = pp.cents;
     heldFrequency_ = pp.frequency;
     missedFrames_  = 0;
     result.stage = PitchStage::Ok;
@@ -109,6 +119,8 @@ PitchResult Pipeline::process(const float* input, int frameCount) {
 
 void Pipeline::setA4(float hz) {
     noteMapper_.setA4(hz);
+    postProcessor_.setA4(hz);
+    clearHold();
 }
 
 void Pipeline::setNoiseGateDb(float db) {
@@ -154,11 +166,17 @@ void Pipeline::clearHold() {
 }
 
 void Pipeline::registerMiss() {
-    if (++missedFrames_ > noteHold_.maxMissedFrames) clearHold();
+    if (++missedFrames_ > noteHold_.maxMissedFrames) resetTracking();
+}
+
+void Pipeline::resetTracking() {
+    postProcessor_.reset();
+    clearHold();
 }
 
 void Pipeline::setHpfCutoff(float hz) {
     hpf_ = BiquadHpf(sampleRate_, hz);
+    workPrimed_ = false; // the kept frame was filtered at the old cutoff
 }
 
 void Pipeline::setOnsetDetectionEnabled(bool enabled) {

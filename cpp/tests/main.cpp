@@ -1066,6 +1066,176 @@ static void testPyinRealStringNoOctaveUp() {
     }
 }
 
+// Appends `frames` frames of a harmonic tone at `hz` to `out`.
+static void appendTone(std::vector<float>& out, float hz, float sr, int n, int frames) {
+    auto tone = generateHarmonicTone(hz, sr, n * frames);
+    for (float& v : tone) v *= 0.3f;
+    out.insert(out.end(), tone.begin(), tone.end());
+}
+
+static void testNewNoteAfterSilenceIsNotThePreviousOne() {
+    // A2, a pause, then D3. The median and EMA used to survive the pause, so
+    // the first D3 frames were reported as A2 and then as B2 and C3.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   firstFrames = 20, silentFrames = 8, secondFrames = 12;
+
+    std::vector<float> input;
+    appendTone(input, 110.0f, sr, n, firstFrames);
+    input.resize(input.size() + static_cast<size_t>(n * silentFrames), 0.0f);
+    appendTone(input, 146.83f, sr, n, secondFrames);
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    const int onset = firstFrames + silentFrames;
+    int pitched = 0, wrongNote = 0, firstPitched = -1;
+    for (int f = 0; f < onset + secondFrames; ++f) {
+        auto r = engine.process(input.data() + f * n, n);
+        if (f < onset || !r.hasPitch) continue;
+        if (firstPitched < 0) firstPitched = f - onset;
+        ++pitched;
+        if (r.noteName != "D" || r.octave != 3) ++wrongNote;
+    }
+
+    std::cout << "A2, silence, D3: pitched=" << pitched << " wrong note=" << wrongNote
+              << " first pitched frame=" << firstPitched << "\n";
+
+    assert(wrongNote == 0);
+    assert(firstPitched >= 0 && firstPitched <= 1);
+}
+
+static void testNoteChangeReportsNoPhantomNotes() {
+    // A2 straight into D3, no pause. The EMA used to blend the two while the
+    // change was being confirmed, reporting B2 (+192 cents) and C3 on the way.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   firstFrames = 20, secondFrames = 12;
+
+    std::vector<float> input;
+    appendTone(input, 110.0f, sr, n, firstFrames);
+    appendTone(input, 146.83f, sr, n, secondFrames);
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    int phantom = 0, reachedD3 = 0;
+    for (int f = 0; f < firstFrames + secondFrames; ++f) {
+        auto r = engine.process(input.data() + f * n, n);
+        if (f < firstFrames || !r.hasPitch) continue;
+        const bool isA2 = r.noteName == "A" && r.octave == 2;
+        const bool isD3 = r.noteName == "D" && r.octave == 3;
+        if (!isA2 && !isD3) ++phantom;
+        if (isD3) {
+            ++reachedD3;
+            assert(std::fabs(r.cents) < 5.0f);
+        }
+    }
+
+    std::cout << "A2 into D3: phantom notes=" << phantom << " D3 frames=" << reachedD3 << "\n";
+
+    assert(phantom == 0);
+    assert(reachedD3 > 0);
+}
+
+static void testCentsFollowA4() {
+    // With A4 = 442, a 442 Hz tone is A4 at 0 cents. The post-processor
+    // measured against a hard-coded 440 and its cents replaced the mapper's,
+    // so this read +7.86.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   frames = 12;
+
+    auto input = generateHarmonicTone(442.0f, sr, n * frames);
+
+    TunerEngine engine(sr, n);
+    engine.setA4(442.0f);
+
+    PitchResult last;
+    for (int f = 0; f < frames; ++f) {
+        auto r = engine.process(input.data() + f * n, n);
+        if (r.hasPitch) last = r;
+    }
+
+    std::cout << "A4=442, 442 Hz tone: " << last.noteName << last.octave
+              << " cents=" << last.cents << "\n";
+
+    assert(last.hasPitch);
+    assert(last.noteName == "A" && last.octave == 4);
+    assertNear(last.cents, 0.0f, 1.0f);
+}
+
+static void testJustTemperamentCentsReachTheResult() {
+    // Same override: the just-intonation offset the mapper applies never
+    // reached the result. E is 13.69 cents flat of equal temperament in just
+    // intonation, so an equal-tempered E4 reads about +13.7.
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   frames = 12;
+
+    auto input = generateHarmonicTone(329.63f, sr, n * frames);
+
+    TunerEngine engine(sr, n);
+    engine.setTemperament("just");
+
+    PitchResult last;
+    for (int f = 0; f < frames; ++f) {
+        auto r = engine.process(input.data() + f * n, n);
+        if (r.hasPitch) last = r;
+    }
+
+    std::cout << "just temperament, equal E4: cents=" << last.cents << "\n";
+
+    assert(last.hasPitch);
+    assertNear(last.cents, 13.69f, 1.5f);
+}
+
+static void testOverlapDoesNotBiasLowStrings() {
+    // Overlapping frames ran the stateful high-pass filter over the shared
+    // samples again, starting each frame from the state the previous frame's
+    // END had left. On a decaying low E that read several cents sharp at
+    // 50 % overlap. Passing the hop lets the pipeline filter each sample once.
+    constexpr float sr  = 48000.0f;
+    constexpr int   n   = 2048;
+    constexpr int   hop = 1024;
+    constexpr float hz  = 82.407f;
+    constexpr int   total = 96000; // 2 s
+
+    auto input = generateHarmonicTone(hz, sr, total);
+    auto noise = generateNoise(total, -60.0f);
+    for (int i = 0; i < total; ++i) {
+        const float decay = std::exp(-1.5f * static_cast<float>(i) / sr);
+        input[i] = 0.4f * decay * input[i] + noise[i];
+    }
+
+    auto meanErrorCents = [&](bool passHop) {
+        TunerEngine engine(sr, n);
+        engine.setFrequencyRange(55.0f, 1320.0f);
+        engine.setHpfCutoff(45.0f);
+        double sum = 0.0;
+        int count = 0;
+        for (int start = 0; start + n <= total; start += hop) {
+            auto r = (passHop && start > 0)
+                ? engine.process(input.data() + start, n, hop)
+                : engine.process(input.data() + start, n);
+            const float t = static_cast<float>(start + n) / sr;
+            if (!r.hasPitch || t < 0.3f || t > 1.5f) continue;
+            sum += 1200.0 * std::log2(r.frequency / hz);
+            ++count;
+        }
+        assert(count > 20);
+        return static_cast<float>(sum / count);
+    };
+
+    const float withHop    = meanErrorCents(true);
+    const float withoutHop = meanErrorCents(false);
+
+    std::cout << "E2 at 50% overlap: mean error with hop=" << withHop
+              << " cents, refiltering the overlap=" << withoutHop << " cents\n";
+
+    assert(std::fabs(withHop) < 0.5f);
+}
+
 int main() {
     testNoteMapper();
 
@@ -1119,6 +1289,13 @@ int main() {
     testNoteHoldKeepsDecayingNote();
     testNoteHoldDoesNotStartOrJump();
     testNoteHoldReleases();
+
+    // Note tracking across note changes, A4 reference, overlap
+    testNewNoteAfterSilenceIsNotThePreviousOne();
+    testNoteChangeReportsNoPhantomNotes();
+    testCentsFollowA4();
+    testJustTemperamentCentsReachTheResult();
+    testOverlapDoesNotBiasLowStrings();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();

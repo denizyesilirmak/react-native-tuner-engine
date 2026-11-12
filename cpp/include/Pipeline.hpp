@@ -28,7 +28,10 @@ public:
 
     Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector);
 
-    PitchResult process(const float* input, int frameCount);
+    // newSamples: how many samples at the end of `input` were not in the
+    // previous frame (the hop). Pass it when frames overlap, so the high-pass
+    // filter runs once over each sample; -1 means the whole frame is new.
+    PitchResult process(const float* input, int frameCount, int newSamples = -1);
 
     void setA4(float hz);
     void setNoiseGateDb(float db);
@@ -66,7 +69,10 @@ private:
     void clearHold();
     void registerMiss();
 
-    std::vector<float> workBuffer_; // HPF + windowing happen here (copy of input)
+    std::vector<float> workBuffer_; // high-passed frame, kept between calls
+    bool workPrimed_ = false;       // workBuffer_ holds the previous filtered frame
+
+    void resetTracking(); // drop the note being followed: hold + post-processor
 
     float calculateRmsDb(const float* input, int n) const;
     float calculateRmsLinear(const float* input, int n) const;

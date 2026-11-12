@@ -14,7 +14,7 @@ class TunerEngine {
 public:
     TunerEngine(float sampleRate, int frameSize);
 
-    PitchResult process(const float* input, int frameCount);
+    PitchResult process(const float* input, int frameCount, int newSamples = -1);
 
     void setA4(float a4);
     void setNoiseGateDb(float db);

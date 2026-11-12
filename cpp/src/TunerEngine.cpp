@@ -14,8 +14,8 @@ TunerEngine::TunerEngine(float sampleRate, int frameSize) {
     pipeline_ = std::make_unique<Pipeline>(frameSize, sampleRate, std::move(fusion));
 }
 
-PitchResult TunerEngine::process(const float* input, int frameCount) {
-    return pipeline_->process(input, frameCount);
+PitchResult TunerEngine::process(const float* input, int frameCount, int newSamples) {
+    return pipeline_->process(input, frameCount, newSamples);
 }
 
 void TunerEngine::setA4(float a4) {

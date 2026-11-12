@@ -26,6 +26,8 @@ public:
 
     void reset();
     void setConfig(Config cfg);
+    // Reference pitch the note boundaries are measured against. Default 440.
+    void setA4(float hz);
 
 private:
     Config cfg_;
@@ -46,6 +48,8 @@ private:
     int  candidateMidi_  = -1;
     int  candidateCount_ = 0;
 
-    static int freqToMidi(float hz);
-    static float freqToCentsFromMidi(float hz, int midi);
+    float a4_ = 440.0f;
+
+    int freqToMidi(float hz) const;
+    float freqToCentsFromMidi(float hz, int midi) const;
 };

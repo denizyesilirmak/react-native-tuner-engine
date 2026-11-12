@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 
-static constexpr float kA4 = 440.0f;
-
 PostProcessor::PostProcessor() : cfg_{} {}
 PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
     cfg_.emaAlpha = std::clamp(cfg_.emaAlpha, 0.01f, 1.0f);
@@ -46,14 +44,20 @@ float PostProcessor::median5() const {
     return std::min(c, e);
 }
 
-int PostProcessor::freqToMidi(float hz) {
-    if (hz <= 0.0f) return -1;
-    return static_cast<int>(std::round(69.0f + 12.0f * std::log2(hz / kA4)));
+void PostProcessor::setA4(float hz) {
+    if (hz <= 0.0f || hz == a4_) return;
+    a4_ = hz;
+    reset(); // the note boundaries moved; the locked note may no longer hold
 }
 
-float PostProcessor::freqToCentsFromMidi(float hz, int midi) {
+int PostProcessor::freqToMidi(float hz) const {
+    if (hz <= 0.0f) return -1;
+    return static_cast<int>(std::round(69.0f + 12.0f * std::log2(hz / a4_)));
+}
+
+float PostProcessor::freqToCentsFromMidi(float hz, int midi) const {
     if (hz <= 0.0f || midi < 0) return 0.0f;
-    const float targetHz = kA4 * std::pow(2.0f, (midi - 69) / 12.0f);
+    const float targetHz = a4_ * std::pow(2.0f, (midi - 69) / 12.0f);
     return 1200.0f * std::log2(hz / targetHz);
 }
 
@@ -94,6 +98,13 @@ PostProcessor::Result PostProcessor::process(float frequency, float confidence) 
 
     if (lockedMidi_ < 0) {
         lockedMidi_ = newMidi;
+    }
+
+    // A different note is being confirmed. Blending its frequency into the
+    // EMA of the locked note reported notes that were never played (A2 to D3
+    // passed through B2 and C3), so hold the output until the change settles.
+    if (newMidi != lockedMidi_) {
+        return Result{ 0.0f, lockedMidi_, 0.0f, false };
     }
 
     // 4. EMA — only for smooth cents/frequency display within the locked note

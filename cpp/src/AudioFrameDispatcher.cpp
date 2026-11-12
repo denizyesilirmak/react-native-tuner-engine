@@ -206,7 +206,7 @@ void AudioFrameDispatcher::workerLoop() {
                 PitchResult result;
                 {
                     std::lock_guard<std::mutex> lock(engineMutex_);
-                    result = engine_->process(frameBuffer_.data(), frameSize_);
+                    result = engine_->process(frameBuffer_.data(), frameSize_, hopSize_);
                 }
                 if (callback_) {
                     callback_(result);
