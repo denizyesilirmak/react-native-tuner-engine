@@ -8,6 +8,7 @@
 #include "PitchResult.hpp"
 #include "PostProcessor.hpp"
 #include "SnrEstimator.hpp"
+#include "SpectralRefiner.hpp"
 #include "StringMatcher.hpp"
 #include "Window.hpp"
 
@@ -45,6 +46,8 @@ public:
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
     void setNoteHold(NoteHold hold);
+    // Measure the pitch from the note's partials (SpectralRefiner). On by default.
+    void setSpectralRefinement(bool enabled);
 
 private:
     int frameSize_;
@@ -59,6 +62,15 @@ private:
     SnrEstimator snr_;
     OnsetDetector onsetDetector_;
     PostProcessor postProcessor_;
+    SpectralRefiner refiner_;
+    bool refine_ = true;
+    int  unrefinedFrames_ = 0; // accepted frames in a row the refiner could not measure
+    // Measured fundamental over the period estimate, for the note being
+    // followed; 0 = not known yet. A stiff string's period estimate sits a
+    // few cents above its fundamental by a nearly constant amount.
+    float fineOverCoarse_ = 0.0f;
+    float minHz_ = 60.0f;   // the detector's range, to hold corrections to
+    float maxHz_ = 1200.0f;
     NoteMapper noteMapper_;
     StringMatcher stringMatcher_;
 

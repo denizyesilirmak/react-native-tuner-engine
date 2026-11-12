@@ -873,9 +873,30 @@ static void testPyinMultiplesDoNotSplitConfidence() {
 // --- Note hold -------------------------------------------------------------
 
 // One frame of a harmonic tone at toneDb (RMS dBFS) over -75 dBFS white noise.
+// Sample position of the stream the frame helpers below cut their frames
+// from. Consecutive frames of one note must continue each other's phase, as
+// frames of a real stream do: the engine measures a note's partials across
+// frame boundaries, and a tone restarted at phase 0 every frame is a
+// different sound.
+static long gStreamPosition = 0;
+
+// `sampleCount` samples of the harmonic tone, starting at gStreamPosition.
+static std::vector<float> nextHarmonicTone(float fundamental, int sampleCount) {
+    std::vector<float> buffer(sampleCount, 0.0f);
+    for (int harmonic = 1; harmonic <= 5; ++harmonic) {
+        const float amplitude = 0.5f / static_cast<float>(harmonic);
+        const double step = 2.0 * 3.14159265358979323846 * fundamental * harmonic / 48000.0;
+        for (int i = 0; i < sampleCount; ++i) {
+            buffer[i] += amplitude * static_cast<float>(std::sin(step * static_cast<double>(gStreamPosition + i)));
+        }
+    }
+    gStreamPosition += sampleCount;
+    return buffer;
+}
+
 static std::vector<float> toneOverRoom(float hz, float toneDb, uint32_t seed, int n = 2048) {
     auto frame = generateNoise(n, -75.0f, seed);
-    auto tone  = generateHarmonicTone(hz, 48000.0f, n);
+    auto tone  = nextHarmonicTone(hz, n);
     const float k = dbToLinear(toneDb) / rmsOf(tone.data(), n);
     for (int i = 0; i < n; ++i) frame[i] += tone[i] * k;
     return frame;
@@ -886,7 +907,7 @@ static std::vector<float> toneOverRoom(float hz, float toneDb, uint32_t seed, in
 // excite the HPF's carried-over state and distort the next frame.
 static std::vector<float> rampFrame(float hz, float fromDb, float toDb, uint32_t seed, int n = 2048) {
     auto frame = generateNoise(n, -75.0f, seed);
-    auto tone  = generateHarmonicTone(hz, 48000.0f, n);
+    auto tone  = nextHarmonicTone(hz, n);
     const float unit = 1.0f / rmsOf(tone.data(), n);
     for (int i = 0; i < n; ++i) {
         const float db = fromDb + (toDb - fromDb) * static_cast<float>(i) / static_cast<float>(n);
@@ -898,6 +919,7 @@ static std::vector<float> rampFrame(float hz, float fromDb, float toDb, uint32_t
 // Fresh engine whose SNR floor has learned the room, locked onto `hz`, then
 // faded from -40 to -67 dBFS in one frame, ready for weak (-67 dBFS) frames.
 static void lockNote(TunerEngine& engine, float hz, int n = 2048) {
+    gStreamPosition = 0;
     for (int f = 0; f < 30; ++f) {
         auto noise = generateNoise(n, -75.0f, 0xA000u + static_cast<uint32_t>(f));
         engine.process(noise.data(), n);
@@ -1018,6 +1040,7 @@ static void testNoteHoldReleases() {
         for (int m = 0; m < misses; ++m) {
             auto noise = generateNoise(n, -62.0f, 0xE000u + static_cast<uint32_t>(m));
             auto r = engine.process(noise.data(), n);
+            gStreamPosition += n; // the string keeps its phase while unheard
             assert(!r.hasPitch); // noise alone is never a note
         }
         auto f = weakG3(0xF002u);
@@ -1276,6 +1299,98 @@ static void testPyinNoSharpBiasInNoise() {
     assert(std::fabs(mean) < 1.5);
 }
 
+// A string: partial k at k * f0 * sqrt(1 + B k^2) with amplitude amp[k-1],
+// added to `out` from `start` on, decaying slowly.
+static void addStiffString(std::vector<float>& out, int start, double f0, double stiffness,
+                           const std::vector<double>& amplitudes, double level) {
+    constexpr double sr = 48000.0;
+    for (size_t k = 1; k <= amplitudes.size(); ++k) {
+        const double hz = k * f0 * std::sqrt(1.0 + stiffness * k * k);
+        if (hz > 0.45 * sr) break;
+        const double step = 2.0 * 3.14159265358979323846 * hz / sr;
+        for (size_t i = static_cast<size_t>(start); i < out.size(); ++i) {
+            const double t = static_cast<double>(i - static_cast<size_t>(start)) / sr;
+            out[i] += static_cast<float>(level * amplitudes[k - 1] * std::exp(-1.0 * t)
+                                         * std::sin(step * static_cast<double>(i - static_cast<size_t>(start)) + 0.3 * k));
+        }
+    }
+}
+
+// Runs `input` through an engine and returns the mean error in cents against
+// `hz` over the readings between `fromSeconds` and the end, with their count
+// and the number of readings more than 50 cents away.
+struct ReadingStats { double meanCents; int count; int wrongNote; };
+static ReadingStats readStream(const std::vector<float>& input, double hz, double fromSeconds,
+                               int n = 2048, float minHz = 55.0f, float maxHz = 1320.0f) {
+    TunerEngine engine(48000.0f, n);
+    engine.setFrequencyRange(minHz, maxHz);
+    engine.setHpfCutoff(45.0f);
+    ReadingStats stats{0.0, 0, 0};
+    double sum = 0.0;
+    for (size_t p = 0; p + static_cast<size_t>(n) <= input.size(); p += static_cast<size_t>(n)) {
+        auto r = engine.process(input.data() + p, n);
+        if (!r.hasPitch || static_cast<double>(p + n) / 48000.0 < fromSeconds) continue;
+        const double cents = 1200.0 * std::log2(r.frequency / hz);
+        if (std::fabs(cents) > 50.0) { ++stats.wrongNote; continue; }
+        sum += cents;
+        ++stats.count;
+    }
+    stats.meanCents = stats.count ? sum / stats.count : 0.0;
+    return stats;
+}
+
+static const std::vector<double> kPluckedAmplitudes = {1.0, 0.5, 0.33, 0.25, 0.2, 0.17, 0.14, 0.12};
+
+static void testStiffStringReadsItsFundamental() {
+    // A wound low E with stiffness B = 3e-4: its partials sit progressively
+    // above exact multiples, and a period estimate of the whole wave read
+    // about 5.5 cents sharp.
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    addStiffString(input, 24000, 82.407, 3.0e-4, kPluckedAmplitudes, 0.1);
+    const auto stats = readStream(input, 82.407, 0.8);
+    std::cout << "stiff E2 (B=3e-4): mean " << stats.meanCents << " cents over " << stats.count << " readings\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 0.3);
+}
+
+static void testRingingNeighbourDoesNotMoveTheReading() {
+    // A2 plucked while the low E still rings 10 dB under it. The period
+    // estimate was pulled about 5 cents flat, with a fixed sign.
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    addStiffString(input, 4800, 82.407, 0.0, kPluckedAmplitudes, 0.1 * 0.316);
+    addStiffString(input, 28800, 110.0, 0.0, kPluckedAmplitudes, 0.1);
+    const auto stats = readStream(input, 110.0, 0.9);
+    std::cout << "A2 over a ringing E2 (-10 dB): mean " << stats.meanCents << " cents over " << stats.count << " readings\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 0.3);
+}
+
+static void testNoteOverRingingFourthIsRead() {
+    // E4 plucked over a B3 ringing 10 dB under it. Together they repeat at
+    // the period of E2, which is what the period detector reports, with too
+    // little confidence to show anything. Nothing sounds at E2 itself.
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    addStiffString(input, 4800, 246.942, 0.0, kPluckedAmplitudes, 0.1 * 0.316);
+    addStiffString(input, 28800, 329.628, 0.0, kPluckedAmplitudes, 0.1);
+    const auto stats = readStream(input, 329.628, 0.9);
+    std::cout << "E4 over a ringing B3 (-10 dB): mean " << stats.meanCents << " cents over " << stats.count << " readings\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 0.3);
+}
+
+static void testWeakFundamentalIsNotReadAnOctaveUp() {
+    // A string whose even partials carry over 90 % of the energy (a real
+    // nylon E4 does). Judged by energy it is an E5; its weak fundamental says
+    // otherwise.
+    std::vector<float> input = generateNoise(48000 * 2, -70.0f);
+    addStiffString(input, 24000, 329.628, 5.0e-5, {0.2, 1.0, 0.1, 0.5, 0.05, 0.3}, 0.1);
+    const auto stats = readStream(input, 329.628, 0.8);
+    std::cout << "E4 with a weak fundamental: mean " << stats.meanCents << " cents, wrong note "
+              << stats.wrongNote << " of " << (stats.count + stats.wrongNote) << "\n";
+    assert(stats.count > 20 && stats.wrongNote == 0);
+    assert(std::fabs(stats.meanCents) < 0.3);
+}
+
 int main() {
     testNoteMapper();
 
@@ -1337,6 +1452,12 @@ int main() {
     testJustTemperamentCentsReachTheResult();
     testOverlapDoesNotBiasLowStrings();
     testPyinNoSharpBiasInNoise();
+
+    // Spectral refinement
+    testStiffStringReadsItsFundamental();
+    testRingingNeighbourDoesNotMoveTheReading();
+    testNoteOverRingingFourthIsRead();
+    testWeakFundamentalIsNotReadAnOctaveUp();
 
     // M8 Adaptive Frame Size & Overlap tests
     testInstrumentRecommendedFrameSize();

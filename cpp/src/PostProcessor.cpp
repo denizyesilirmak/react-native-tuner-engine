@@ -61,56 +61,58 @@ float PostProcessor::freqToCentsFromMidi(float hz, int midi) const {
     return 1200.0f * std::log2(hz / targetHz);
 }
 
-PostProcessor::Result PostProcessor::process(float frequency, float confidence) {
-    // 1. Feed median buffer (treat 0 as "silent frame")
+PostProcessor::Result PostProcessor::process(float frequency, float confidence, float emaAlpha,
+                                             bool measured) {
+    const float alpha = emaAlpha > 0.0f ? std::clamp(emaAlpha, 0.01f, 1.0f) : cfg_.emaAlpha;
+
+    if (frequency <= 0.0f || confidence <= 0.0f) {
+        return Result{ 0.0f, lockedMidi_, 0.0f, false };
+    }
+
+    // 1. Which note is this frame? Decided on the frame itself, not on the
+    // median: the median kept answering with the old note for two frames
+    // after the string had changed, and those stale readings were shown.
+    const int frameMidi = freqToMidi(frequency);
+
+    if (lockedMidi_ < 0) {
+        lockedMidi_ = frameMidi;
+    }
+
+    if (frameMidi != lockedMidi_) {
+        if (frameMidi == candidateMidi_) {
+            ++candidateCount_;
+        } else {
+            candidateMidi_  = frameMidi;
+            candidateCount_ = 1;
+        }
+        if (candidateCount_ < cfg_.hysteresisFrames) {
+            // A different note is being confirmed (or this frame is a stray).
+            // Report nothing: neither the old note, which may be gone, nor a
+            // blend of the two, which was never played.
+            return Result{ 0.0f, lockedMidi_, 0.0f, false };
+        }
+        // Confirmed: start the new note clean.
+        lockedMidi_     = candidateMidi_;
+        candidateMidi_  = -1;
+        candidateCount_ = 0;
+        medianIdx_      = 0;
+        medianFill_     = 0;
+        smoothedFreq_   = 0.0f;
+    } else {
+        candidateMidi_  = -1;
+        candidateCount_ = 0;
+    }
+
+    // 2. Median over the frames of this note: drops a stray value inside it.
     medianBuf_[medianIdx_] = frequency;
     medianIdx_ = (medianIdx_ + 1) % kMedianLen;
     if (medianFill_ < kMedianLen) ++medianFill_;
+    const float med = (!measured && medianFill_ == kMedianLen) ? median5() : frequency;
 
-    const float med = (medianFill_ == kMedianLen) ? median5() : frequency;
-
-    if (med <= 0.0f || confidence <= 0.0f) {
-        return Result{ 0.0f, lockedMidi_, 0.0f, false };
-    }
-
-    // 3. Hysteresis — use the raw median for note detection (not the smoothed EMA).
-    // This prevents the slow EMA from drifting through enharmonic neighbours during transitions.
-    const int newMidi = freqToMidi(med);
-
-    if (newMidi == lockedMidi_) {
-        candidateMidi_  = -1;
-        candidateCount_ = 0;
-    } else {
-        if (newMidi == candidateMidi_) {
-            ++candidateCount_;
-        } else {
-            candidateMidi_  = newMidi;
-            candidateCount_ = 1;
-        }
-
-        if (candidateCount_ >= cfg_.hysteresisFrames) {
-            lockedMidi_    = candidateMidi_;
-            smoothedFreq_  = med; // snap EMA to new note to avoid lag artefacts
-            candidateMidi_  = -1;
-            candidateCount_ = 0;
-        }
-    }
-
-    if (lockedMidi_ < 0) {
-        lockedMidi_ = newMidi;
-    }
-
-    // A different note is being confirmed. Blending its frequency into the
-    // EMA of the locked note reported notes that were never played (A2 to D3
-    // passed through B2 and C3), so hold the output until the change settles.
-    if (newMidi != lockedMidi_) {
-        return Result{ 0.0f, lockedMidi_, 0.0f, false };
-    }
-
-    // 4. EMA — only for smooth cents/frequency display within the locked note
+    // 3. EMA for a steady display within the note.
     smoothedFreq_ = (smoothedFreq_ <= 0.0f)
         ? med
-        : cfg_.emaAlpha * med + (1.0f - cfg_.emaAlpha) * smoothedFreq_;
+        : alpha * med + (1.0f - alpha) * smoothedFreq_;
 
     const float cents = freqToCentsFromMidi(smoothedFreq_, lockedMidi_);
 

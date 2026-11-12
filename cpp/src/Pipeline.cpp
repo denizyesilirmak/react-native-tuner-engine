@@ -4,6 +4,11 @@
 #include <cmath>
 
 static constexpr float kMinLinear = 1e-7f;
+static constexpr float kRefinedEmaAlpha = 0.7f;
+static constexpr float kRefineGraceSeconds = 0.25f;
+// A subharmonic correction is only believed when the corrected note's
+// partials make up most of the sound.
+static constexpr float kMinExplained = 0.6f;
 
 Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector)
     : frameSize_(frameSize)
@@ -11,6 +16,7 @@ Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetect
     , hpf_(sampleRate, 70.0f)       // 70 Hz HPF — removes DC and sub-bass rumble
     , window_(frameSize)
     , detector_(std::move(detector))
+    , refiner_(sampleRate)
     , workBuffer_(static_cast<size_t>(frameSize))
 {}
 
@@ -25,10 +31,12 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         std::copy(workBuffer_.begin() + newSamples, workBuffer_.end(), workBuffer_.begin());
         std::copy(input + retain, input + frameSize_, workBuffer_.begin() + retain);
         hpf_.process(workBuffer_.data() + retain, newSamples);
+        refiner_.push(workBuffer_.data() + retain, newSamples);
     } else {
         std::copy(input, input + frameSize_, workBuffer_.begin());
         hpf_.process(workBuffer_.data(), frameSize_);
         workPrimed_ = true;
+        refiner_.push(workBuffer_.data(), frameSize_);
     }
 
     // --- RMS gate ---
@@ -59,7 +67,36 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     // --- SNR-weighted confidence ---
     const float snrDb     = snr_.update(rmsLinear, det.voiced);
     const float snrWeight = SnrEstimator::snrToWeight(snrDb);
-    const float weightedConf = det.confidence * snrWeight;
+    float weightedConf = det.confidence * snrWeight;
+
+    // --- Measure the note from its partials ---
+    // The detector has said which note; its partials say exactly where it is,
+    // and whether the detector answered with a subharmonic of it.
+    float measuredHz = det.frequency;
+    bool refinedReading = false;
+    if (refine_ && det.voiced && det.frequency > 0.0f) {
+        const float refined = refiner_.refine(det.frequency);
+        if (refined > 0.0f) {
+            measuredHz = refined;
+            refinedReading = true;
+            if (refiner_.lastMultiple() > 1) {
+                if (refined > maxHz_ || refiner_.lastExplained() < kMinExplained) {
+                    // A correction to a note outside the instrument's range,
+                    // or to partials that are a small part of what is in the
+                    // room (hum, noise): not a note. Keep the detector's word.
+                    measuredHz = det.frequency;
+                    refinedReading = false;
+                } else {
+                    // The period detector was unsure because it was
+                    // describing two things at once. What counts now is how
+                    // clearly the note that was measured stands out.
+                    weightedConf = std::max(
+                        weightedConf,
+                        static_cast<float>(refiner_.lastDominance() * refiner_.lastExplained()) * snrWeight);
+                }
+            }
+        }
+    }
 
     // A decaying string's confidence sinks below the threshold while the note
     // is still clearly there. A frame close to the note already shown may
@@ -67,8 +104,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     bool held = false;
     if (noteHold_.enabled && heldFrequency_ > 0.0f && det.voiced
         && weightedConf < confidenceThreshold_ && weightedConf >= noteHold_.minConfidence
-        && det.frequency > 0.0f) {
-        const float cents = 1200.0f * std::log2(det.frequency / heldFrequency_);
+        && measuredHz > 0.0f) {
+        const float cents = 1200.0f * std::log2(measuredHz / heldFrequency_);
         held = std::fabs(cents) <= noteHold_.maxCents;
     }
 
@@ -82,8 +119,44 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
         return nopit;
     }
 
+    if (refine_) {
+        if (refinedReading) {
+            unrefinedFrames_ = 0;
+            if (refiner_.lastMultiple() == 1) {
+                const float ratio = measuredHz / det.frequency;
+                fineOverCoarse_ = fineOverCoarse_ > 0.0f
+                    ? 0.7f * fineOverCoarse_ + 0.3f * ratio
+                    : ratio;
+            }
+        } else if (fineOverCoarse_ > 0.0f && heldFrequency_ > 0.0f
+                   && std::fabs(1200.0f * std::log2(det.frequency * fineOverCoarse_ / heldFrequency_)) <= 50.0f) {
+            // The note already being followed, in a frame its partials could
+            // not be measured in (a sudden change of level). Carry on from
+            // the period estimate, corrected by what this string has shown.
+            measuredHz = det.frequency * fineOverCoarse_;
+        } else {
+            // A young note cannot be measured yet, and the period estimate
+            // of its first frames is pulled sharp by the bright attack. Say
+            // nothing for a moment rather than show that; a sound the
+            // refiner never locks onto falls back to the period estimate.
+            const int grace = static_cast<int>(
+                std::ceil(kRefineGraceSeconds * sampleRate_ / static_cast<float>(frameSize_)));
+            if (refiner_.hasHistoryFor(det.frequency) && ++unrefinedFrames_ <= grace) {
+                PitchResult nopit;
+                nopit.rmsDb = rmsDb;
+                nopit.stage = PitchStage::Settling;
+                nopit.detectorConfidence = det.confidence;
+                nopit.snrDb = snrDb;
+                return nopit;
+            }
+        }
+    }
+
     // --- Post-process: median + EMA + hysteresis ---
-    PostProcessor::Result pp = postProcessor_.process(det.frequency, weightedConf);
+    // A refined reading is already steady frame to frame; heavy smoothing
+    // would only make it lag the string.
+    PostProcessor::Result pp = postProcessor_.process(
+        measuredHz, weightedConf, refinedReading ? kRefinedEmaAlpha : -1.0f, refinedReading);
 
     if (!pp.isStable || pp.frequency <= 0.0f) {
         registerMiss();
@@ -132,12 +205,16 @@ void Pipeline::setConfidenceThreshold(float threshold) {
 }
 
 void Pipeline::setFrequencyRange(float minHz, float maxHz) {
+    minHz_ = minHz;
+    maxHz_ = maxHz;
     detector_->setFrequencyRange(minHz, maxHz);
     clearHold();
 }
 
 void Pipeline::setInstrument(const std::string& name) {
     FrequencyRange r = instrumentPreset(name);
+    minHz_ = r.minHz;
+    maxHz_ = r.maxHz;
     detector_->setFrequencyRange(r.minHz, r.maxHz);
     clearHold();
 }
@@ -153,6 +230,10 @@ void Pipeline::setTemperament(const std::string& name) {
 void Pipeline::setPostProcessorConfig(PostProcessor::Config cfg) {
     postProcessor_.setConfig(cfg);
     clearHold();
+}
+
+void Pipeline::setSpectralRefinement(bool enabled) {
+    refine_ = enabled;
 }
 
 void Pipeline::setNoteHold(NoteHold hold) {
@@ -171,6 +252,9 @@ void Pipeline::registerMiss() {
 
 void Pipeline::resetTracking() {
     postProcessor_.reset();
+    refiner_.resetString();
+    unrefinedFrames_ = 0;
+    fineOverCoarse_ = 0.0f;
     clearHold();
 }
 

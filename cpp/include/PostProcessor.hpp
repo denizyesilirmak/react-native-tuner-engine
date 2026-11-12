@@ -22,7 +22,12 @@ public:
     };
 
     // Call once per detected frame. frequency = 0 means "no pitch".
-    Result process(float frequency, float confidence);
+    // emaAlpha > 0 overrides the configured smoothing for this frame.
+    // `measured`: the frequency is already a robust measurement (taken from
+    // the note's partials), so the median stage, which exists to drop stray
+    // values and costs two frames of lag, is skipped.
+    Result process(float frequency, float confidence, float emaAlpha = -1.0f,
+                   bool measured = false);
 
     void reset();
     void setConfig(Config cfg);
