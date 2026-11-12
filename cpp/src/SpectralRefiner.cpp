@@ -91,7 +91,7 @@ constexpr double kHalfwayFractionNew = 0.02;
 // pluck itself, and how much of a partial's level counts as "already there".
 constexpr int    kBeforePluckLength = 4096;
 constexpr int    kPluckMargin       = 512;
-constexpr double kAlreadyThereFraction = 0.5;
+constexpr double kAlreadyThereFraction = 0.65;
 // The partials that arrived with the pluck must hold this share of the
 // energy before they alone decide which note was plucked.
 constexpr double kMinArrivedShare   = 0.2;
