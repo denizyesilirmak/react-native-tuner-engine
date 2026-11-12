@@ -249,7 +249,11 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
             // into a three-second ring.
             // (Not in the moments after a pluck: there the partials are a
             // small part of the window because the attack fills it.)
-            faint = refiner_.lastExplained() < kMinFollowExplained
+            // A note down to one partial is faint too, however much of the
+            // sound that partial is: at the room's level it wandered 15
+            // cents between frames nine seconds into a low E.
+            faint = (refiner_.lastExplained() < kMinFollowExplained
+                     || refiner_.lastPartialCount() <= 1)
                 && (samplesSincePluck_ < 0
                     || samplesSincePluck_ > static_cast<int>(kConfirmSeconds * sampleRate_));
             weightedConf = std::max(weightedConf, confidenceThreshold_);
