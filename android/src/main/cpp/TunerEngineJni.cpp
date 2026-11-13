@@ -293,6 +293,14 @@ Java_com_tunerengine_TunerEngineModule_nativeSetA4(
 }
 
 JNIEXPORT void JNICALL
+Java_com_tunerengine_TunerEngineModule_nativeSetPeriodReference(
+    JNIEnv* /*env*/, jobject /*thiz*/, jboolean on
+) {
+    std::lock_guard<std::mutex> lock(gMutex);
+    if (gDispatcher) gDispatcher->setPeriodReference(on == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
 Java_com_tunerengine_TunerEngineModule_nativeSetHpfCutoff(
     JNIEnv* /*env*/, jobject /*thiz*/, jfloat hz
 ) {

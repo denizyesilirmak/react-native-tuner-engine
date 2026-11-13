@@ -32,6 +32,18 @@ void AudioFrameDispatcher::recomputeHopSize() {
 void AudioFrameDispatcher::start() {
     if (running_.exchange(true)) return; // already running
     firstFrame_ = true;
+    // Drop whatever the previous run left behind: the worker stops before the
+    // audio source does, so the ring can still hold the end of the last
+    // session, and the first frame would be read from it.
+    {
+        float discard[512];
+        int left = ring_.available();
+        while (left > 0) {
+            const int n = std::min(left, 512);
+            if (ring_.pop(discard, n) == 0) break;
+            left -= n;
+        }
+    }
     workerThread_ = std::thread(&AudioFrameDispatcher::workerLoop, this);
 }
 
@@ -115,6 +127,12 @@ void AudioFrameDispatcher::setPostProcessorConfig(PostProcessor::Config cfg) {
     if (engine_) engine_->setPostProcessorConfig(cfg);
 }
 
+void AudioFrameDispatcher::setPeriodReference(bool on) {
+    std::lock_guard<std::mutex> lock(engineMutex_);
+    currentPeriodReference_ = on;
+    if (engine_) engine_->setPeriodReference(on);
+}
+
 void AudioFrameDispatcher::setHpfCutoff(float hz) {
     std::lock_guard<std::mutex> lock(engineMutex_);
     currentHpfCutoff_ = hz;
@@ -147,6 +165,7 @@ void AudioFrameDispatcher::applyStoredSettings() {
     engine_->setConfidenceThreshold(currentConfidenceThreshold_);
     engine_->setFrequencyRange(currentMinHz_, currentMaxHz_);
     engine_->setHpfCutoff(currentHpfCutoff_);
+    engine_->setPeriodReference(currentPeriodReference_);
     engine_->setPostProcessorConfig(currentPostCfg_);
     engine_->setOnsetDetectionEnabled(currentOnsetEnabled_);
     if (!currentInstrument_.empty()) engine_->setInstrument(currentInstrument_);
@@ -206,7 +225,7 @@ void AudioFrameDispatcher::workerLoop() {
                 PitchResult result;
                 {
                     std::lock_guard<std::mutex> lock(engineMutex_);
-                    result = engine_->process(frameBuffer_.data(), frameSize_);
+                    result = engine_->process(frameBuffer_.data(), frameSize_, hopSize_);
                 }
                 if (callback_) {
                     callback_(result);

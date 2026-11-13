@@ -3,7 +3,21 @@
 #include <algorithm>
 #include <cmath>
 
-static constexpr float kA4 = 440.0f;
+// Smoothing of measured readings: this slow while the note barely moves,
+// the caller's rate once a step reaches kFastStepCents.
+static constexpr float kSteadyAlpha   = 0.12f;
+static constexpr float kFastStepCents = 6.0f;
+// Following a moving note: how much of each error goes into the trend, the
+// error below which nothing is learned, the fade when errors disagree, and
+// the fastest motion followed (cents per frame).
+static constexpr float kTrendGain     = 0.25f;
+static constexpr float kTrendMinCents = 0.7f;
+static constexpr float kTrendFade     = 0.5f;
+static constexpr float kTrendMaxCents = 15.0f;
+static constexpr float kFaintTrendMaxCents = 3.0f;
+// How far ahead of the smoothed value the reading is carried, in frames of
+// trend. One made a fast turn 6 cents behind instead of 8.5; two overshot.
+static constexpr float kLeadFrames    = 1.0f;
 
 PostProcessor::PostProcessor() : cfg_{} {}
 PostProcessor::PostProcessor(Config cfg) : cfg_(cfg) {
@@ -16,6 +30,7 @@ void PostProcessor::reset() {
     medianIdx_      = 0;
     medianFill_     = 0;
     smoothedFreq_   = 0.0f;
+        trendCents_     = 0.0f;
     lockedMidi_     = -1;
     candidateMidi_  = -1;
     candidateCount_ = 0;
@@ -46,65 +61,116 @@ float PostProcessor::median5() const {
     return std::min(c, e);
 }
 
-int PostProcessor::freqToMidi(float hz) {
-    if (hz <= 0.0f) return -1;
-    return static_cast<int>(std::round(69.0f + 12.0f * std::log2(hz / kA4)));
+void PostProcessor::setA4(float hz) {
+    if (hz <= 0.0f || hz == a4_) return;
+    a4_ = hz;
+    reset(); // the note boundaries moved; the locked note may no longer hold
 }
 
-float PostProcessor::freqToCentsFromMidi(float hz, int midi) {
+int PostProcessor::freqToMidi(float hz) const {
+    if (hz <= 0.0f) return -1;
+    return static_cast<int>(std::round(69.0f + 12.0f * std::log2(hz / a4_)));
+}
+
+float PostProcessor::freqToCentsFromMidi(float hz, int midi) const {
     if (hz <= 0.0f || midi < 0) return 0.0f;
-    const float targetHz = kA4 * std::pow(2.0f, (midi - 69) / 12.0f);
+    const float targetHz = a4_ * std::pow(2.0f, (midi - 69) / 12.0f);
     return 1200.0f * std::log2(hz / targetHz);
 }
 
-PostProcessor::Result PostProcessor::process(float frequency, float confidence) {
-    // 1. Feed median buffer (treat 0 as "silent frame")
-    medianBuf_[medianIdx_] = frequency;
-    medianIdx_ = (medianIdx_ + 1) % kMedianLen;
-    if (medianFill_ < kMedianLen) ++medianFill_;
+PostProcessor::Result PostProcessor::process(float frequency, float confidence, float emaAlpha,
+                                             bool measured) {
+    const float alpha = emaAlpha > 0.0f ? std::clamp(emaAlpha, 0.01f, 1.0f) : cfg_.emaAlpha;
 
-    const float med = (medianFill_ == kMedianLen) ? median5() : frequency;
-
-    if (med <= 0.0f || confidence <= 0.0f) {
+    if (frequency <= 0.0f || confidence <= 0.0f) {
         return Result{ 0.0f, lockedMidi_, 0.0f, false };
     }
 
-    // 3. Hysteresis — use the raw median for note detection (not the smoothed EMA).
-    // This prevents the slow EMA from drifting through enharmonic neighbours during transitions.
-    const int newMidi = freqToMidi(med);
-
-    if (newMidi == lockedMidi_) {
-        candidateMidi_  = -1;
-        candidateCount_ = 0;
-    } else {
-        if (newMidi == candidateMidi_) {
-            ++candidateCount_;
-        } else {
-            candidateMidi_  = newMidi;
-            candidateCount_ = 1;
-        }
-
-        if (candidateCount_ >= cfg_.hysteresisFrames) {
-            lockedMidi_    = candidateMidi_;
-            smoothedFreq_  = med; // snap EMA to new note to avoid lag artefacts
-            candidateMidi_  = -1;
-            candidateCount_ = 0;
-        }
-    }
+    // 1. Which note is this frame? Decided on the frame itself, not on the
+    // median: the median kept answering with the old note for two frames
+    // after the string had changed, and those stale readings were shown.
+    const int frameMidi = freqToMidi(frequency);
 
     if (lockedMidi_ < 0) {
-        lockedMidi_ = newMidi;
+        lockedMidi_ = frameMidi;
     }
 
-    // 4. EMA — only for smooth cents/frequency display within the locked note
-    smoothedFreq_ = (smoothedFreq_ <= 0.0f)
-        ? med
-        : cfg_.emaAlpha * med + (1.0f - cfg_.emaAlpha) * smoothedFreq_;
+    if (frameMidi != lockedMidi_) {
+        if (frameMidi == candidateMidi_) {
+            ++candidateCount_;
+        } else {
+            candidateMidi_  = frameMidi;
+            candidateCount_ = 1;
+        }
+        if (candidateCount_ < cfg_.hysteresisFrames) {
+            // A different note is being confirmed (or this frame is a stray).
+            // Report nothing: neither the old note, which may be gone, nor a
+            // blend of the two, which was never played.
+            return Result{ 0.0f, lockedMidi_, 0.0f, false };
+        }
+        // Confirmed: start the new note clean.
+        lockedMidi_     = candidateMidi_;
+        candidateMidi_  = -1;
+        candidateCount_ = 0;
+        medianIdx_      = 0;
+        medianFill_     = 0;
+        smoothedFreq_   = 0.0f;
+        trendCents_     = 0.0f;
+    } else {
+        candidateMidi_  = -1;
+        candidateCount_ = 0;
+    }
 
-    const float cents = freqToCentsFromMidi(smoothedFreq_, lockedMidi_);
+    // 2. Median over the frames of this note: drops a stray value inside it.
+    medianBuf_[medianIdx_] = frequency;
+    medianIdx_ = (medianIdx_ + 1) % kMedianLen;
+    if (medianFill_ < kMedianLen) ++medianFill_;
+    const float med = (!measured && medianFill_ == kMedianLen) ? median5() : frequency;
+
+    // 3. EMA for a steady display within the note.
+    if (smoothedFreq_ <= 0.0f) {
+        smoothedFreq_ = med;
+    } else if (measured) {
+        // A ringing string wanders by a cent or two and the display should
+        // not; a peg being turned moves it by many and the display must keep
+        // up. Slow for small steps, fast for large ones.
+        //
+        // Smoothing alone trails a moving note: at 60 cents a second the
+        // reading was 9 cents behind a loud string and 25 behind a faint
+        // one. So the motion itself is followed. The reading is first moved
+        // on by the trend, then corrected by what was measured, and the
+        // trend learns from the same error; it fades as soon as the errors
+        // stop agreeing, so a ringing string's wander does not start one.
+        const float predicted = smoothedFreq_ * std::pow(2.0f, trendCents_ / 1200.0f);
+        const float error = 1200.0f * std::log2(med / predicted);
+        const float adaptive = kSteadyAlpha
+            + (alpha - kSteadyAlpha) * std::min(1.0f, std::fabs(error) / kFastStepCents);
+        smoothedFreq_ = predicted * std::pow(2.0f, adaptive * error / 1200.0f);
+        // A faint note's errors are mostly noise, and noise can agree with
+        // itself for a few frames: its trend is kept to what a peg does.
+        const float trendLimit = alpha < kSteadyAlpha ? kFaintTrendMaxCents : kTrendMaxCents;
+        const bool sameWay = (error > 0.0f) == (lastError_ > 0.0f)
+            && std::fabs(error) >= kTrendMinCents && std::fabs(lastError_) >= kTrendMinCents;
+        trendCents_ = sameWay
+            ? std::clamp(trendCents_ + kTrendGain * error, -trendLimit, trendLimit)
+            : trendCents_ * kTrendFade;
+        lastError_ = error;
+        leading_ = sameWay;
+    } else {
+        smoothedFreq_ = alpha * med + (1.0f - alpha) * smoothedFreq_;
+    }
+
+    // What was measured is the note as it was about half a measuring window
+    // ago. While it moves, the reading is carried forward by that much; the
+    // moment the errors stop agreeing it is not, or the reading would run on
+    // past where the peg stopped.
+    const float shown = measured
+        ? smoothedFreq_ * std::pow(2.0f, (leading_ ? kLeadFrames * trendCents_ : 0.0f) / 1200.0f)
+        : smoothedFreq_;
+    const float cents = freqToCentsFromMidi(shown, lockedMidi_);
 
     return Result{
-        smoothedFreq_,
+        shown,
         lockedMidi_,
         cents,
         true

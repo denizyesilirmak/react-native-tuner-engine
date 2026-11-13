@@ -53,6 +53,16 @@ export type TunerConfig = {
    */
   hpfCutoffHz?: number;
   /**
+   * What the reading stands for.
+   * - 'series' (default): where the string's series of partials is. This is
+   *   the pitch the ear hears and it stays put while the note dies away.
+   * - 'period': the period of the waveform, which is what tuners built on
+   *   autocorrelation or YIN show. On a string whose fundamental the
+   *   instrument's body pulls (a guitar's G, by 8 cents) it reads 4 to 5
+   *   cents away from 'series' and drifts as the partials decay.
+   */
+  pitchReference?: 'series' | 'period';
+  /**
    * Enable onset detection. When enabled, the PostProcessor resets on note
    * attacks for faster response. Minimal CPU cost (one comparison per frame).
    * Default: false

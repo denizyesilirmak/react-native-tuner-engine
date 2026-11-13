@@ -12,6 +12,7 @@ add_library(tuner_engine_core STATIC
     src/SnrEstimator.cpp
     src/OnsetDetector.cpp
     src/PostProcessor.cpp
+    src/SpectralRefiner.cpp
     src/Pipeline.cpp
     src/TunerEngine.cpp
     src/AudioFrameDispatcher.cpp

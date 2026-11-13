@@ -22,10 +22,19 @@ public:
     };
 
     // Call once per detected frame. frequency = 0 means "no pitch".
-    Result process(float frequency, float confidence);
+    // emaAlpha > 0 overrides the configured smoothing for this frame.
+    // `measured`: the frequency is already a robust measurement (taken from
+    // the note's partials), so the median stage, which exists to drop stray
+    // values and costs two frames of lag, is skipped.
+    Result process(float frequency, float confidence, float emaAlpha = -1.0f,
+                   bool measured = false);
 
     void reset();
     void setConfig(Config cfg);
+    // Reference pitch the note boundaries are measured against. Default 440.
+    void setA4(float hz);
+    // How fast the note is moving, cents per frame.
+    float trendCents() const { return trendCents_; }
 
 private:
     Config cfg_;
@@ -40,12 +49,18 @@ private:
 
     // EMA state
     float smoothedFreq_ = 0.0f;
+    // How fast the note is moving, cents per frame (a peg being turned).
+    float trendCents_ = 0.0f;
+    float lastError_ = 0.0f;
+    bool  leading_ = false;
 
     // Hysteresis state
     int  lockedMidi_     = -1;
     int  candidateMidi_  = -1;
     int  candidateCount_ = 0;
 
-    static int freqToMidi(float hz);
-    static float freqToCentsFromMidi(float hz, int midi);
+    float a4_ = 440.0f;
+
+    int freqToMidi(float hz) const;
+    float freqToCentsFromMidi(float hz, int midi) const;
 };

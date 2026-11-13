@@ -92,7 +92,9 @@ describe('TunerEngine', () => {
     const cb = jest.fn();
     const unsub = TunerEngine.onPitch(cb);
 
-    expect((globalThis as any).__tunerEngineOnPitch).toBe(cb);
+    const event0 = makePitchEvent({ frequency: 220 });
+    (globalThis as any).__tunerEngineOnPitch(event0);
+    expect(cb).toHaveBeenCalledWith(event0);
 
     const event = makePitchEvent();
     DeviceEventEmitter.emit('onPitch', event);
@@ -109,6 +111,28 @@ describe('TunerEngine', () => {
 
     DeviceEventEmitter.emit('onPitch', makePitchEvent());
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('delivers to every subscriber until its own unsubscribe', () => {
+    const first = jest.fn();
+    const second = jest.fn();
+    const unsubFirst = TunerEngine.onPitch(first);
+    const unsubSecond = TunerEngine.onPitch(second);
+
+    const event = makePitchEvent();
+    (globalThis as any).__tunerEngineOnPitch(event);
+    expect(first).toHaveBeenCalledWith(event);
+    expect(second).toHaveBeenCalledWith(event);
+
+    // The first one leaving must not silence the second.
+    unsubFirst();
+    const next = makePitchEvent({ frequency: 330 });
+    (globalThis as any).__tunerEngineOnPitch(next);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledWith(next);
+
+    unsubSecond();
+    expect((globalThis as any).__tunerEngineOnPitch).toBeUndefined();
   });
 
   it('delivers hasPitch=false events', () => {

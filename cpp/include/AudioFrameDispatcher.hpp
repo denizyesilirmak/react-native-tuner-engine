@@ -52,6 +52,7 @@ public:
     void setAdaptiveFrameSize(bool enabled);
     void setPostProcessorConfig(PostProcessor::Config cfg);
     void setHpfCutoff(float hz);
+    void setPeriodReference(bool on);
     void setOnsetDetectionEnabled(bool enabled);
     void setOnsetConfig(OnsetDetector::Config cfg);
 
@@ -96,6 +97,7 @@ private:
     float currentMinHz_{60.0f};
     float currentMaxHz_{1200.0f};
     float currentHpfCutoff_{70.0f};
+    bool currentPeriodReference_{false};
     bool currentOnsetEnabled_{false};
     PostProcessor::Config currentPostCfg_{};
 
