@@ -8,6 +8,7 @@ export interface Spec extends TurboModule {
   setInstrument(name: string): void;
   setTemperament(name: string): void;
   setTuning(name: string): void;
+  setTuningTranspose(semitones: number): void;
   requestPermission(): Promise<boolean>;
   getStatus(): Object;
   addListener(eventName: string): void;

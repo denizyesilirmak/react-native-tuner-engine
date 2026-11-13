@@ -132,6 +132,22 @@ Bass E1 (41.2 Hz) now detects correctly with 4096 frame size.
 
 ---
 
+## M9 — Eastern instruments (1.5.0)
+
+Adds oud, cümbüş, bağlama and bouzouki without touching the detectors. Everything existing keeps its behaviour; the only semantic change is that string targets now follow the A4 reference (they were pinned to 440 before).
+
+**Changes:**
+
+- **`TuningPresets.hpp`** — 15 new profiles. `StringTarget` gains `octaveOffset` (default 0, so existing aggregate initialisers are untouched): a course that also carries a string one octave above (+1) or below (−1).
+- **`InstrumentPresets.hpp`** — ranges for the four instruments; oud gets the 4096 frame like cello (C2 / C#2 bass course).
+- **`StringMatcher`** — matches a flagged course at either octave, scales targets by A4 (`setA4`) and by a transpose in semitones (`setTranspose`). `StringMatch.targetHz` is the candidate actually matched; `name` stays the notated course name.
+- **`setTuningTranspose(semitones)`** — new method through Pipeline → TunerEngine → AudioFrameDispatcher (cached, re-applied on engine recreation) → iOS `TunerBridge` / Android JNI → Turbo Module spec. Bağlama presets are notated on A; the player's real pitch and the family size (cura +5, divan −5) come in as a transpose.
+- **JS** — `Instrument` and `TuningPreset` unions extended; `useTuner` takes `tuning` and `tuningTranspose`; `src/tunings.ts` exports `TUNING_PROFILES` and helpers so apps stop duplicating the string table. A jest test parses the `.hpp` and fails if the two tables drift.
+
+**Tests:** preset lookup, instrument ranges, matcher unison behaviour unchanged, octave courses, transpose + A4, end-to-end transpose through `TunerEngine`, oud C#2 detection with adaptive frame size.
+
+---
+
 ## Key files
 
 ```

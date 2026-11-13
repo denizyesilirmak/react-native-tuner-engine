@@ -16,6 +16,7 @@ jest.mock('../NativeTunerEngine', () => ({
     setInstrument: jest.fn(),
     setTemperament: jest.fn(),
     setTuning: jest.fn(),
+    setTuningTranspose: jest.fn(),
     getStatus: jest
       .fn()
       .mockReturnValue({ isRunning: false, engineReady: true }),
@@ -76,6 +77,20 @@ describe('TunerEngine', () => {
   it('sets instrument', () => {
     TunerEngine.setInstrument('guitar');
     expect(native.setInstrument).toHaveBeenCalledWith('guitar');
+  });
+
+  it('accepts the 1.5 instrument and tuning ids', () => {
+    TunerEngine.setInstrument('baglama');
+    expect(native.setInstrument).toHaveBeenCalledWith('baglama');
+    TunerEngine.setTuning('bouzouki_trichordo');
+    expect(native.setTuning).toHaveBeenCalledWith('bouzouki_trichordo');
+  });
+
+  it('sets and validates tuning transpose', () => {
+    TunerEngine.setTuningTranspose(5);
+    expect(native.setTuningTranspose).toHaveBeenCalledWith(5);
+    TunerEngine.setTuningTranspose(Number.NaN);
+    expect(native.setTuningTranspose).toHaveBeenCalledTimes(1);
   });
 
   it('sets temperament', () => {

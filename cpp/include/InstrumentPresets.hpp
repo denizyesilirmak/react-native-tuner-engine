@@ -18,16 +18,21 @@ inline FrequencyRange instrumentPreset(const std::string& name) {
     if (name == "viola")     return { 125.0f, 1320.0f };
     if (name == "mandolin")  return { 190.0f, 2100.0f };
     if (name == "banjo")     return { 190.0f, 1320.0f };
+    if (name == "oud")       return {  60.0f, 1200.0f }; // C2 bass course up to fingered notes on D4/G4
+    if (name == "cumbus")    return {  90.0f, 1600.0f }; // A2 – G4 open, fingered to ~G5
+    if (name == "baglama")   return {  90.0f, 1800.0f }; // A2 bam string up to the top frets
+    if (name == "bouzouki")  return {  90.0f, 1800.0f }; // G2 (Irish) / C3 up to fingered D4 course
     return { 60.0f, 1200.0f }; // chromatic default
 }
 
 // Returns the recommended DSP frame size for a given instrument.
-// Low-pitched instruments (bass, cello) need larger frames to resolve
+// Low-pitched instruments (bass, cello, oud) need larger frames to resolve
 // their fundamental frequencies via autocorrelation (YIN lag = frameSize/2).
 //   frame=2048 @ 48 kHz → min detectable ≈ 46.9 Hz
 //   frame=4096 @ 48 kHz → min detectable ≈ 23.4 Hz
 inline int instrumentRecommendedFrameSize(const std::string& name) {
     if (name == "bass")  return 4096;
     if (name == "cello") return 4096;
-    return 2048; // guitar, violin, viola, ukulele, mandolin, banjo, chromatic
+    if (name == "oud")   return 4096; // C2 / C#2 bass course sits at the 2048 limit
+    return 2048; // guitar, violin, viola, ukulele, mandolin, banjo, cumbus, baglama, bouzouki, chromatic
 }

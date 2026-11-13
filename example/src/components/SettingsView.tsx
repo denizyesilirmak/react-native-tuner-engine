@@ -7,8 +7,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { Instrument, QualityPreset } from 'react-native-tuner-engine';
+import type {
+  Instrument,
+  QualityPreset,
+  TuningPreset,
+} from 'react-native-tuner-engine';
 import { InstrumentPicker } from './InstrumentPicker';
+import { TuningPicker } from './TuningPicker';
 import { SettingRow } from './SettingRow';
 
 const QUALITY_OPTIONS: { label: string; value: QualityPreset | undefined }[] = [
@@ -20,6 +25,8 @@ const QUALITY_OPTIONS: { label: string; value: QualityPreset | undefined }[] = [
 
 type SettingsViewProps = Readonly<{
   instrument: Instrument;
+  tuning: TuningPreset | undefined;
+  tuningTranspose: number;
   a4: number;
   noiseGateDb: number;
   confidenceThreshold: number;
@@ -32,6 +39,8 @@ type SettingsViewProps = Readonly<{
   quality: QualityPreset | undefined;
   overlapRatio: number;
   onInstrumentChange: (v: Instrument) => void;
+  onTuningChange: (v: TuningPreset | undefined) => void;
+  onTuningTransposeChange: (v: number) => void;
   onA4Change: (v: number) => void;
   onNoiseGateDbChange: (v: number) => void;
   onConfidenceThresholdChange: (v: number) => void;
@@ -47,6 +56,8 @@ type SettingsViewProps = Readonly<{
 
 export function SettingsView({
   instrument,
+  tuning,
+  tuningTranspose,
   a4,
   noiseGateDb,
   confidenceThreshold,
@@ -59,6 +70,8 @@ export function SettingsView({
   quality,
   overlapRatio,
   onInstrumentChange,
+  onTuningChange,
+  onTuningTransposeChange,
   onA4Change,
   onNoiseGateDbChange,
   onConfidenceThresholdChange,
@@ -77,6 +90,20 @@ export function SettingsView({
       contentContainerStyle={styles.settingsContent}
     >
       <InstrumentPicker value={instrument} onChange={onInstrumentChange} />
+      <TuningPicker
+        instrument={instrument}
+        value={tuning}
+        onChange={onTuningChange}
+      />
+      <SettingRow
+        label="Tuning Transpose"
+        value={tuningTranspose}
+        min={-12}
+        max={12}
+        step={1}
+        unit="st"
+        onChange={onTuningTransposeChange}
+      />
 
       {/* Quality Preset Picker */}
       <Text style={styles.sectionLabel}>Quality Preset</Text>
