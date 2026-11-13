@@ -43,8 +43,10 @@ class TunerEngine {
       const cfg = spectrum === true ? {} : spectrum;
       resolved.spectrumEnabled = true;
       if (cfg.bands !== undefined) resolved.spectrumBands = cfg.bands;
-      if (cfg.minFrequency !== undefined) resolved.spectrumMinHz = cfg.minFrequency;
-      if (cfg.maxFrequency !== undefined) resolved.spectrumMaxHz = cfg.maxFrequency;
+      if (cfg.minFrequency !== undefined)
+        resolved.spectrumMinHz = cfg.minFrequency;
+      if (cfg.maxFrequency !== undefined)
+        resolved.spectrumMaxHz = cfg.maxFrequency;
     }
 
     // quality preset overrides frameSize and overlapRatio
