@@ -1,3 +1,7 @@
+// Every check below is an assert(). CI builds Release (-DNDEBUG), which would
+// compile them all out and let any failure pass, so keep them on regardless.
+#undef NDEBUG
+
 #include "NoteMapper.hpp"
 #include "OnsetDetector.hpp"
 #include "TunerEngine.hpp"
@@ -797,6 +801,35 @@ static void testPipelineRejectsToneBuriedInNoise() {
     std::cout << "tone buried in noise: pitched frames=" << pitched << "/" << noteFrames << "\n";
 
     assert(pitched == 0);
+}
+
+static void testPipelineFloorLearnsRoomNoise() {
+    // Steady room noise over the gate. pYIN still reports a (weak) pitch for
+    // most of these frames, but they must count as noise for the floor: after
+    // ~3 s the noise itself is no longer "signal". Fails when the floor is fed
+    // the voiced flag alone (the floor creeps at the held-note rate, SNR ~19 dB).
+    constexpr float sr = 48000.0f;
+    constexpr int   n  = 2048;
+    constexpr int   frames = 150;
+
+    auto input = generateNoise(n * frames, -50.0f);
+
+    TunerEngine engine(sr, n);
+    engine.setInstrument("guitar");
+
+    PitchResult r;
+    int pitched = 0;
+    for (int f = 0; f < frames; ++f) {
+        r = engine.process(input.data() + f * n, n);
+        if (r.hasPitch) ++pitched;
+    }
+
+    std::cout << "room noise @ -50 dBFS: snr after " << frames << " frames=" << r.snrDb
+              << " pitched=" << pitched << "\n";
+
+    assert(r.stage != PitchStage::Gated);
+    assert(pitched == 0);
+    assert(r.snrDb < 3.0f);
 }
 
 static void testPipelineQuietTailStillTuned() {
@@ -1639,6 +1672,7 @@ int main() {
     testSnrEstimator();
     testPipelineDistantGuitar();
     testPipelineRejectsToneBuriedInNoise();
+    testPipelineFloorLearnsRoomNoise();
     testPipelineQuietTailStillTuned();
     testPyinMultiplesDoNotSplitConfidence();
     testPyinRealStringNoOctaveUp();

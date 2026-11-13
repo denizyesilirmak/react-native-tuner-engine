@@ -59,6 +59,13 @@ static bool isHarmonicOf(float hz, float base) {
     return nearest >= 2.0f && nearest <= 6.0f && std::fabs(ratio - nearest) <= 0.03f * nearest;
 }
 
+// Weakest detection that still counts as "a note" for the noise floor. pYIN
+// reports a pitch for nearly any frame, plain room noise included (fused
+// confidence ~0.25 on white noise), so the voiced flag alone made every noise
+// frame look like a held note and the floor never learned the room. Frames
+// below this can neither start nor hold a note, so for the floor they're noise.
+static constexpr float kFloorNoteConfidence = 0.4f;
+
 Pipeline::Pipeline(int frameSize, float sampleRate, std::unique_ptr<IPitchDetector> detector)
     : frameSize_(frameSize)
     , sampleRate_(sampleRate)
@@ -170,7 +177,8 @@ PitchResult Pipeline::process(const float* input, int frameCount, int newSamples
     DetectorResult det = detector_->detect(workBuffer_.data(), frameSize_, sampleRate_);
 
     // --- SNR-weighted confidence ---
-    const float snrDb     = snr_.update(rmsLinear, det.voiced);
+    const bool  noteLike  = det.voiced && det.confidence >= kFloorNoteConfidence;
+    const float snrDb     = snr_.update(rmsLinear, noteLike);
     const float snrWeight = SnrEstimator::snrToWeight(snrDb);
     float weightedConf = det.confidence * snrWeight;
 

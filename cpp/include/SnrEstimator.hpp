@@ -13,8 +13,9 @@ class SnrEstimator {
 public:
     explicit SnrEstimator(float floorInitDb = kFloorInitDb);
 
-    // Update with the current frame's linear RMS and whether the detector heard
-    // a pitch in it. Returns the frame's SNR in dB.
+    // Update with the current frame's linear RMS and whether the frame looks
+    // like a note. Pass a confidence-gated flag, not the detector's raw voiced
+    // bit: pYIN calls almost any noise "voiced". Returns the frame's SNR in dB.
     float update(float rmsLinear, bool voiced);
 
     // Map SNR to a confidence weight in [0, 1].
